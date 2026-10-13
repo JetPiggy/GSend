@@ -217,7 +217,13 @@ export default function Landing({ client, state, prefill }: Props) {
               ref={codeInput}
               className="code-input"
               value={code}
-              onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 4))}
+              onChange={(event) => {
+                const next = event.target.value.replace(/\D/g, "").slice(0, CODE_LENGTH);
+                setCode(next);
+                // The last digit is the whole request, so it is taken as one: no button to
+                // find, which on a phone also meant putting the keyboard away first.
+                if (next.length === CODE_LENGTH && code.length < CODE_LENGTH) client.join(next);
+              }}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
               inputMode="numeric"
