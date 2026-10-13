@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { ConnectionPath } from "../../shared/protocol";
 import type { GSendClient, Snapshot } from "../core/client";
 import { directPickerSupported, formatBytes, maxFileBytes } from "../core/sink";
 import type { TransferView } from "../core/transfer";
-import { useI18n, type Translator } from "../i18n";
+import { useI18n, type MessageKey, type Translator } from "../i18n";
+import { DropOverlay, useWindowDrop } from "./drop";
 
 interface Props {
   client: GSendClient;
@@ -15,66 +16,45 @@ export default function TransferPanel({ client, state }: Props) {
   const { t, tm } = i18n;
   const fileInput = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState("");
-  const [dragging, setDragging] = useState(false);
   const [joinDismissed, setJoinDismissed] = useState(false);
-  const compact = useMediaQuery("(max-width: 860px)");
 
-  const transfers = [...state.outgoing, ...state.incoming].sort(
-    (a, b) => b.startedAt - a.startedAt,
-  );
+  const transfers = [...state.outgoing, ...state.incoming].sort((a, b) => b.startedAt - a.startedAt);
 
   const upBytes = state.outgoing.reduce((sum, row) => sum + row.transferred, 0);
   const downBytes = state.incoming.reduce((sum, row) => sum + row.transferred, 0);
   const itemCount = transfers.length + state.texts.length;
   // One file has its own button right there; the shortcut earns its place from two up.
-  const unsaved = state.incoming.filter(
-    (row) => row.status === "done" && row.downloadUrl && !row.downloaded,
-  ).length;
+  const unsaved = state.incoming.filter((row) => row.status === "done" && row.downloadUrl && !row.downloaded).length;
 
-  const pick = (list: FileList | null) => {
-    if (!list || list.length === 0) return;
-    client.sendFiles([...list]);
+  const send = (list: Iterable<File> | null) => {
+    if (!list) return;
+    const picked = [...list];
+    if (picked.length > 0) client.sendFiles(picked);
     if (fileInput.current) fileInput.current.value = "";
   };
 
+  const dragging = useWindowDrop(send);
+
   const submitText = (event: React.FormEvent) => {
     event.preventDefault();
+    if (!draft.trim()) return;
     client.sendText(draft);
     setDraft("");
   };
 
   return (
-    <section
-      className="panel"
-      onDragOver={(event) => {
-        event.preventDefault();
-        setDragging(true);
-      }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={(event) => {
-        event.preventDefault();
-        setDragging(false);
-        pick(event.dataTransfer.files);
-      }}
-    >
-      <div className="panel__main">
+    <section className="session">
+      {dragging && <DropOverlay label={t("transfer.dropRelease")} />}
+
+      <div className="session__main">
         <div className="session-head">
-          <h3>{t("transfer.session")}</h3>
+          <h2>{t("transfer.session")}</h2>
           <span className="session-head__meta">
-            {t("transfer.sessionMeta", {
-              count: itemCount,
-              up: formatBytes(upBytes),
-              down: formatBytes(downBytes),
-            })}
+            {t("transfer.sessionMeta", { count: itemCount, up: formatBytes(upBytes), down: formatBytes(downBytes) })}
           </span>
           {unsaved > 1 && (
-            <button
-              type="button"
-              className="btn btn--primary btn--tiny session-head__action"
-              onClick={() => void client.saveAll()}
-            >
-              {t("transfer.saveAll")}{" "}
-              <span className="session-head__count">{unsaved}</span>
+            <button type="button" className="btn btn--small" onClick={() => void client.saveAll()}>
+              {t("transfer.saveAll")} · {unsaved}
             </button>
           )}
         </div>
@@ -84,29 +64,19 @@ export default function TransferPanel({ client, state }: Props) {
           through, with the kill switch in the same breath rather than a step earlier.
         */}
         {state.mode === "code" && state.role === "host" && state.channelsOpen && !joinDismissed && (
-          <p className="alert" style={{ marginBottom: 14 }}>
-            {t("transfer.peerJoined")}
-            <button
-              type="button"
-              className="btn btn--danger btn--tiny"
-              style={{ marginLeft: 10 }}
-              onClick={() => client.leave()}
-            >
+          <div className="alert alert__row" role="status">
+            <span>{t("transfer.peerJoined")}</span>
+            <button type="button" className="btn btn--danger btn--small" onClick={() => client.leave()}>
               {t("transfer.stop")}
             </button>
-            <button
-              type="button"
-              className="btn btn--ghost btn--tiny"
-              style={{ marginLeft: 6 }}
-              onClick={() => setJoinDismissed(true)}
-            >
+            <button type="button" className="btn btn--text" onClick={() => setJoinDismissed(true)}>
               {t("transfer.dismiss")}
             </button>
-          </p>
+          </div>
         )}
 
         {state.notice && (
-          <p className="alert alert--soft" style={{ marginBottom: 14 }} onClick={() => client.dismissNotice()}>
+          <p className="alert alert--soft" onClick={() => client.dismissNotice()}>
             {tm(state.notice)}
           </p>
         )}
@@ -116,14 +86,12 @@ export default function TransferPanel({ client, state }: Props) {
           not put them in this device list for good. Both people have to ask.
         */}
         {state.pairing && (
-          <div className="remember">
-            <p className="remember__text">
-              {t(`remember.${state.pairing.offer}`, { name: state.pairing.name })}
-            </p>
+          <div className="sheet remember">
+            <p>{t(`remember.${state.pairing.offer}`, { name: state.pairing.name })}</p>
             {(state.pairing.offer === "open" || state.pairing.offer === "asked") && (
               <button
                 type="button"
-                className={state.pairing.offer === "asked" ? "btn btn--primary btn--tiny" : "btn btn--secondary btn--tiny"}
+                className={state.pairing.offer === "asked" ? "btn btn--small" : "btn btn--ghost btn--small"}
                 onClick={() => client.rememberPeer()}
               >
                 {t(state.pairing.offer === "asked" ? "remember.agree" : "remember.ask")}
@@ -132,17 +100,15 @@ export default function TransferPanel({ client, state }: Props) {
           </div>
         )}
 
-        <ul className="transfers">
-          {transfers.map((transfer) => (
-            <TransferRow
-              key={transfer.id}
-              transfer={transfer}
-              client={client}
-              i18n={i18n}
-              cells={compact ? 20 : 10}
-            />
-          ))}
-        </ul>
+        {itemCount === 0 && <p className="empty">{t("transfer.empty")}</p>}
+
+        {transfers.length > 0 && (
+          <ul className="transfers">
+            {transfers.map((transfer) => (
+              <TransferRow key={transfer.id} transfer={transfer} client={client} i18n={i18n} />
+            ))}
+          </ul>
+        )}
 
         {state.texts.length > 0 && (
           <ul className="messages">
@@ -151,69 +117,57 @@ export default function TransferPanel({ client, state }: Props) {
               .reverse()
               .map((message) => (
                 <li key={message.id} className={message.mine ? "message message--mine" : "message"}>
-                  <span className="message__glyph" aria-hidden="true">
-                    {message.mine ? "↑" : "↓"}
-                  </span>
                   <span className="message__body">{message.body}</span>
-                  <button
-                    type="button"
-                    className="btn btn--secondary btn--tiny"
-                    onClick={() => void navigator.clipboard.writeText(message.body).catch(() => {})}
-                  >
-                    {t("transfer.copy")}
-                  </button>
+                  <CopyButton text={message.body} i18n={i18n} />
                 </li>
               ))}
           </ul>
         )}
       </div>
 
-      <div className="screen__rule" aria-hidden="true" />
-
-      <aside className="panel__aside">
-        <div className={dragging ? "dropzone dropzone--active" : "dropzone"}>
-          <span className="dropzone__glyph" aria-hidden="true">
-            ↓
-          </span>
-          <p className="dropzone__hint">{t("transfer.dropHere")}</p>
-          <button type="button" className="btn btn--primary btn--block" onClick={() => fileInput.current?.click()}>
+      <aside className="session__aside">
+        <div className="dropzone">
+          <svg className="arrow-up" viewBox="0 0 30 36" aria-hidden="true">
+            <path
+              d="M15 33 C14 24 16 14 15 4 M5 13 C9 10 12 7 15 3 C18 7 21 10 25 13"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <p>{t("landing.dropAnywhere")}</p>
+          <button type="button" className="btn btn--ghost" onClick={() => fileInput.current?.click()}>
             {t("transfer.chooseFiles")}
           </button>
-          <input ref={fileInput} type="file" multiple hidden onChange={(event) => pick(event.target.files)} />
+          <input ref={fileInput} type="file" multiple hidden onChange={(event) => send(event.target.files)} />
         </div>
 
         <form className="composer" onSubmit={submitText}>
           <input
-            className="composer__input"
+            className="field"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={t("transfer.textPlaceholder")}
             aria-label={t("transfer.textLabel")}
           />
-          <button type="submit" className="btn btn--secondary" disabled={!draft.trim()}>
+          <button type="submit" className="btn" disabled={!draft.trim()}>
             {t("transfer.send")}
           </button>
         </form>
 
         {!state.savingTo && directPickerSupported() && (
-          <button
-            type="button"
-            className="btn btn--secondary btn--block"
-            onClick={() => void client.chooseFolder()}
-          >
+          <button type="button" className="btn btn--ghost" onClick={() => void client.chooseFolder()}>
             {t("transfer.chooseFolder")}
           </button>
         )}
 
-        <div className="term term--muted">{statusBlock(state, t("transfer.limitDisk"))}</div>
+        <SessionFacts state={state} i18n={i18n} />
         {/* A slow transfer through the relay looks like the app being slow; say why. */}
         {state.path === "relay" && <p className="aside-note">{t("transfer.relayNote")}</p>}
-
-        <hr className="hr" style={{ margin: "2px 0" }} />
         <p className="aside-note">
-          {state.savingTo
-            ? t("transfer.saveFolder", { folder: state.savingTo })
-            : t("transfer.saveBrowser")}
+          {state.savingTo ? t("transfer.saveFolder", { folder: state.savingTo }) : t("transfer.saveBrowser")}
         </p>
       </aside>
     </section>
@@ -221,43 +175,63 @@ export default function TransferPanel({ client, state }: Props) {
 }
 
 /** The measured route, not whether relay servers were on offer. */
-const ROUTE_LINE: Record<ConnectionPath, string> = {
-  lan: "direct · lan",
-  internet: "direct",
-  relay: "relay · turn",
-  unknown: "connected",
+const ROUTE: Record<ConnectionPath, MessageKey> = {
+  lan: "route.lan",
+  internet: "route.internet",
+  relay: "route.relay",
+  unknown: "route.unknown",
 };
 
-/**
- * The mono blocks are deliberately untranslated — they are the design's CLI voice —
- * except for the one word that has to say whether the ceiling is a number or the disk.
- */
-function statusBlock(state: Snapshot, diskWord: string): string {
-  const route = state.path ? ROUTE_LINE[state.path] : "----";
-  const where = state.savingTo ?? "browser";
-  const ceiling = state.savingTo ? diskWord : `${formatBytes(maxFileBytes())} / file`;
-  // A device session was never named by a code, so the last line reports which paired
-  // device this is rather than a row of dashes.
+function SessionFacts({ state, i18n }: { state: Snapshot; i18n: Translator }) {
+  const { t } = i18n;
+  // A device session was never named by a code, so the last line says which paired
+  // device this is instead.
   const named = state.devices.find((device) => device.id === state.peerDevice);
-  const origin =
-    state.mode === "group"
-      ? `paired  ${named?.name ?? state.peerDevice ?? "device"}`
-      : `code    ${state.code ?? "----"} · burned`;
-  return [`peer    ${route}`, `saving  ${where}`, `limit   ${ceiling}`, origin].join("\n");
+  return (
+    <dl className="facts">
+      <dt>{t("transfer.route")}</dt>
+      <dd>{state.path ? t(ROUTE[state.path]) : "—"}</dd>
+      <dt>{t("transfer.savingIn")}</dt>
+      <dd>{state.savingTo ?? t("transfer.browser")}</dd>
+      <dt>{t("transfer.limit")}</dt>
+      <dd>{state.savingTo ? t("transfer.limitDisk") : formatBytes(maxFileBytes())}</dd>
+      {state.mode === "group" ? (
+        <>
+          <dt>{t("transfer.paired")}</dt>
+          <dd>{named?.name ?? state.peerDevice ?? "—"}</dd>
+        </>
+      ) : (
+        <>
+          <dt>{t("pairing.code")}</dt>
+          <dd>{t("transfer.burned", { code: state.code ?? "----" })}</dd>
+        </>
+      )}
+    </dl>
+  );
 }
 
-function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() => matchMedia(query).matches);
-  useEffect(() => {
-    const mq = matchMedia(query);
-    const onChange = () => setMatches(mq.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, [query]);
-  return matches;
+function CopyButton({ text, i18n }: { text: string; i18n: Translator }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="btn btn--text"
+      onClick={() =>
+        void navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          })
+          .catch(() => {})
+      }
+    >
+      {copied ? i18n.t("host.linkCopied") : i18n.t("transfer.copy")}
+    </button>
+  );
 }
 
-/* ── CLI progress rows ─────────────────────────────────────────────────── */
+/* ── progress rows ─────────────────────────────────────────────────────── */
 
 interface RateState {
   at: number;
@@ -307,7 +281,7 @@ function formatEta(seconds: number): string {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
-/** "267/418 MB" — one unit, so the column stays narrow. */
+/** "267/418 MB" — one unit, so the line stays short. */
 function formatPair(done: number, total: number): string {
   const totalText = formatBytes(total);
   const unit = totalText.split(" ")[1] ?? "";
@@ -322,34 +296,24 @@ export function TransferRow({
   transfer,
   client,
   i18n,
-  cells,
 }: {
   transfer: TransferView;
   client: GSendClient;
   i18n: Translator;
-  cells: number;
 }) {
   const { t } = i18n;
   const { rate, etaSeconds } = useRate(transfer);
 
   const pct = transfer.size > 0 ? Math.min(100, (transfer.transferred / transfer.size) * 100) : 0;
-  const filled = Math.round((pct / 100) * cells);
   const active = transfer.status === "active" || transfer.status === "pending";
   const stopped = transfer.status === "cancelled" || transfer.status === "error";
   const done = transfer.status === "done";
-
-  const fillClass = done ? "bar__fill bar__fill--done" : stopped ? "bar__fill bar__fill--dim" : "bar__fill";
-  const restChar = stopped ? "╳" : "░";
-  const restClass = stopped ? "bar__rest bar__rest--dead" : "bar__rest";
 
   const problem = transfer.problem
     ? t(`cancel.${transfer.problem.code}`, { limit: transfer.problem.limit ?? 0 })
     : null;
 
-  // Three stat cells. Anything empty collapses on phones and leaves its column blank on desktop.
   const live = transfer.status === "active" && rate > 1;
-  const rateText = live ? `${formatBytes(rate)}/s` : "";
-  const etaText = live && etaSeconds !== null ? `eta ${formatEta(etaSeconds)}` : "";
   const statusText = done
     ? transfer.direction === "send"
       ? t("row.sent")
@@ -362,8 +326,14 @@ export function TransferRow({
         ? t("row.paused")
         : transfer.status === "pending"
           ? t("row.pending")
-          : "";
-  const bytesText = active && !statusText ? formatPair(transfer.transferred, transfer.size) : statusText;
+          : null;
+  const meta = [
+    statusText ?? formatPair(transfer.transferred, transfer.size),
+    live ? `${formatBytes(rate)}/s` : null,
+    live && etaSeconds !== null ? t("row.left", { time: formatEta(etaSeconds) }) : null,
+  ].filter(Boolean);
+
+  const barClass = done ? "pbar pbar--done" : stopped ? "pbar pbar--dim" : "pbar";
 
   return (
     <li className={stopped ? "transfer transfer--dim" : "transfer"}>
@@ -371,32 +341,44 @@ export function TransferRow({
         className={active && transfer.direction === "send" ? "transfer__arrow transfer__arrow--live" : "transfer__arrow"}
         aria-hidden="true"
       >
-        {transfer.direction === "send" ? "↑" : "↓"}
+        {/* Drawn rather than typed: system fonts on Windows colour the arrow glyphs. */}
+        <svg viewBox="0 0 16 22" style={transfer.direction === "send" ? undefined : { transform: "rotate(180deg)" }}>
+          <path
+            d="M8 20 C7.6 14 8.3 8 8 2 M2.5 7.5 C4.5 5.8 6.5 4 8 1.8 C9.5 4 11.5 5.8 13.5 7.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       </span>
       <span className="transfer__name" title={transfer.name}>
         {transfer.name}
       </span>
 
-      <span
-        className="transfer__bar"
-        role="progressbar"
-        aria-valuenow={Math.round(pct)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-      >
-        <span className="bar" aria-hidden="true">
-          <span className={fillClass}>{"█".repeat(filled)}</span>
-          <span className={restClass}>{restChar.repeat(cells - filled)}</span>
+      <span className="transfer__bar">
+        <span
+          className={barClass}
+          role="progressbar"
+          aria-label={transfer.name}
+          aria-valuenow={Math.round(pct)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <span className="pbar__fill" style={{ width: `${pct}%` }} />
+          {/* The pig rides the front of the bar while bytes are moving. */}
+          {transfer.status === "active" && transfer.transferred > 0 && (
+            <img className="pbar__pig brand-only" src="/img/fly.webp" alt="" width={54} height={29} style={{ left: `${pct}%` }} />
+          )}
         </span>
+        <span className="transfer__pct">{Math.floor(pct)}%</span>
       </span>
-      <span className="transfer__pct">{Math.floor(pct)}%</span>
 
-      <span className="transfer__stats">
-        <span className="transfer__stat transfer__stat--rate">{rateText}</span>
-        <span className="transfer__stat transfer__stat--eta">{etaText}</span>
-        <span className="transfer__stat transfer__stat--bytes" title={bytesText}>
-          {bytesText}
-        </span>
+      <span className="transfer__meta">
+        {meta.map((part) => (
+          <span key={part}>{part}</span>
+        ))}
       </span>
 
       <span className="transfer__action">
@@ -410,7 +392,7 @@ export function TransferRow({
           // Still offered once saved, in case the first save went astray, but it steps
           // back so the files that still need a press are the ones that stand out.
           <a
-            className={transfer.downloaded ? "btn btn--secondary btn--tiny" : "btn btn--primary btn--tiny"}
+            className={transfer.downloaded ? "btn btn--ghost btn--small" : "btn btn--small"}
             href={transfer.downloadUrl}
             download={transfer.name}
             onClick={() => client.markSaved(transfer.id)}
@@ -419,7 +401,7 @@ export function TransferRow({
           </a>
         )}
         {active && (
-          <button type="button" className="btn btn--secondary btn--tiny" onClick={() => client.cancelTransfer(transfer.id)}>
+          <button type="button" className="btn btn--ghost btn--small" onClick={() => client.cancelTransfer(transfer.id)}>
             {t("transfer.cancel")}
           </button>
         )}

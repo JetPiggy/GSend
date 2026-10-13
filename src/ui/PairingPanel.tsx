@@ -30,42 +30,65 @@ export default function PairingPanel({ client, state }: Props) {
         : t("devices.connecting", { name: peer.name })
       : t("pairing.connectingBody");
 
-  const statusLines = `stun    ok\nturn    ${state.relayEngaged ? "engaged" : "standby"}`;
-
   /*
     Joining never stops to ask for a folder, so this is where the choice is offered.
     Connecting takes a moment either way, and the offer fills it — take it and files
     stream to disk, skip it and they land in browser storage instead.
   */
   const offerFolder = directPickerSupported() && state.savingTo === null;
+  const failed = state.connection === "failed";
 
   return (
-    <section className="panel-card">
-      <div className="kicker kicker--muted">{t("pairing.connecting")}</div>
-      <h3 className="card__title">{title}</h3>
-      <p>{message}</p>
-      {offerFolder && (
-        <div className="panel-card__actions">
-          <button
-            type="button"
-            className="btn btn--primary btn--lg"
-            onClick={() => void client.chooseFolder()}
-          >
-            {t("transfer.chooseFolder")}
-          </button>
-        </div>
-      )}
-      <div className="ice-wait" aria-hidden="true">
-        <span className="ice-wait__bar">████████████████████████</span>
-        <span style={{ color: "var(--ink-55)" }}>ICE</span>
+    <section className="waiting">
+      <img
+        className={failed ? "waiting__pig waiting__pig--still brand-only" : "waiting__pig brand-only"}
+        src={failed ? "/img/crash.webp" : "/img/fly.webp"}
+        alt=""
+        width={failed ? 640 : 760}
+        height={failed ? 384 : 414}
+      />
+      <div className="sheet" aria-live="polite">
+        <h2>
+          {title}
+          {!failed && (
+            <span className="dots" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+          )}
+        </h2>
+        <p>{message}</p>
+        {offerFolder && (
+          <div>
+            <button type="button" className="btn" onClick={() => void client.chooseFolder()}>
+              {t("transfer.chooseFolder")}
+            </button>
+          </div>
+        )}
+        <dl className="facts">
+          {state.code && (
+            <>
+              <dt>{t("pairing.code")}</dt>
+              <dd>{state.code}</dd>
+            </>
+          )}
+          {peer && (
+            <>
+              <dt>{t("transfer.paired")}</dt>
+              <dd>{peer.name}</dd>
+            </>
+          )}
+          <dt>{t("pairing.relay")}</dt>
+          <dd>{state.relayEngaged ? t("pairing.relayEngaged") : t("pairing.relayStandby")}</dd>
+        </dl>
+        {state.notice && (
+          <p className="alert alert--soft" onClick={() => client.dismissNotice()}>
+            {tm(state.notice)}
+          </p>
+        )}
+        {failed && <p className="alert">{t("pairing.noDirectRoute")}</p>}
       </div>
-      <div className="term term--muted">{statusLines}</div>
-      {state.notice && (
-        <p className="alert alert--soft" onClick={() => client.dismissNotice()}>
-          {tm(state.notice)}
-        </p>
-      )}
-      {state.connection === "failed" && <p className="alert">{t("pairing.noDirectRoute")}</p>}
     </section>
   );
 }

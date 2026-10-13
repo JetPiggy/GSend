@@ -1,66 +1,59 @@
 import { useEffect, useRef, useState } from "react";
 import type { GSendClient, Snapshot } from "../core/client";
-import { directPickerSupported, formatBytes, maxFileBytes, prepareStorage } from "../core/sink";
+import { formatBytes } from "../core/sink";
 import { useI18n } from "../i18n";
-import DeviceList from "./DeviceList";
+import CodeBoxes from "./CodeBoxes";
+import { DeviceChips, DeviceManager } from "./DeviceList";
+import { DropOverlay, useWindowDrop } from "./drop";
+import { HandNote, Stamps } from "./hand";
 
 interface Props {
   client: GSendClient;
   state: Snapshot;
-  prefill: string;
+  /** The digits typed so far; held by the app so a failed join keeps them. */
+  code: string;
+  onCode: (code: string) => void;
+  /** The per-file ceiling, said again while a file is held over the page. */
+  limitLine: string;
 }
 
 const CODE_LENGTH = 4;
 
-export default function Landing({ client, state, prefill }: Props) {
+/**
+ * Receiving is the page: four boxes to type the other screen's code into. Sending is
+ * the strip underneath, and a file dropped anywhere on the page is staged for it.
+ */
+export default function Landing({ client, state, code, onCode, limitLine }: Props) {
   const { t, tm } = useI18n();
-  const [code, setCode] = useState(prefill);
   const [focused, setFocused] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [draft, setDraft] = useState("");
-  const [dragging, setDragging] = useState(false);
-  const [limit, setLimit] = useState(() => maxFileBytes());
+  const [managing, setManaging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const codeInput = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (prefill) setCode(prefill);
-  }, [prefill]);
+  const add = (list: Iterable<File> | null) => {
+    if (!list) return;
+    const picked = [...list];
+    if (picked.length > 0) setFiles((current) => [...current, ...picked]);
+    if (fileInput.current) fileInput.current.value = "";
+  };
 
-  // The ceiling depends on whether this browser will actually give us disk.
-  useEffect(() => {
-    let cancelled = false;
-    void prepareStorage().then(() => {
-      if (!cancelled) setLimit(maxFileBytes());
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const staged = files.length > 0 || draft.trim().length > 0;
+  const dragging = useWindowDrop(add);
 
   const start = () => client.host(files, draft.trim() || null);
 
-  // The design pairs the start button with an "↵ enter" hint; honour it.
+  // Enter with nothing in particular focused gets the code, as the button would.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Enter") return;
-      const active = document.activeElement as HTMLElement | null;
-      if (active === codeInput.current) return;
-      const tag = active?.tagName;
+      if (event.key !== "Enter" || event.isComposing) return;
+      const tag = (document.activeElement as HTMLElement | null)?.tagName;
       if (tag === "BUTTON" || tag === "INPUT" || tag === "A" || tag === "TEXTAREA") return;
       start();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
-
-  const add = (list: FileList | null) => {
-    if (!list || list.length === 0) return;
-    setFiles((current) => [...current, ...list]);
-    if (fileInput.current) fileInput.current.value = "";
-  };
 
   /**
    * Joining connects and does nothing else. It used to open the folder picker first,
@@ -77,174 +70,137 @@ export default function Landing({ client, state, prefill }: Props) {
   };
 
   const stagedBytes = files.reduce((sum, file) => sum + file.size, 0);
-  // Two sentences rather than one interpolation: "up to your free disk per file" is not
-  // a sentence, and the two cases are genuinely different claims.
-  const limitLine = directPickerSupported()
-    ? t("landing.limitDisk")
-    : t("landing.limitSize", { size: formatBytes(limit) });
+  const caret = focused && code.length < CODE_LENGTH ? code.length : null;
+  const error = tm(state.error);
 
   return (
-    <section className="screen">
-      <div>
-        <div className="kicker">{t("landing.kicker")}</div>
-        <h1 className="display">{t("landing.title")}</h1>
-        <p className="lede">
-          {t("landing.subtitle")} {limitLine}
-        </p>
+    <section className="home">
+      {dragging && <DropOverlay label={t("landing.dropRelease")} note={limitLine} />}
 
-        {state.error && (
-          <p className="alert" style={{ marginBottom: 20, maxWidth: "46ch" }}>
-            {tm(state.error)}
-          </p>
-        )}
+      <div className="home__ask">
+        <h1 className="ask">
+          {t("landing.ask")}
+          <span className="ask__sub">{t("landing.askSub")}</span>
+        </h1>
+        <HandNote />
+      </div>
 
-        {state.notice && (
-          <p
-            className="alert alert--soft"
-            style={{ marginBottom: 20, maxWidth: "52ch" }}
-            onClick={() => client.dismissNotice()}
-          >
-            {tm(state.notice)}
-          </p>
-        )}
+      {(state.notice || state.groupDisplaced) && (
+        <div className="home__alerts">
+          {state.notice && (
+            <p className="alert alert--soft" onClick={() => client.dismissNotice()}>
+              {tm(state.notice)}
+            </p>
+          )}
+          {/*
+            Only one tab per device can be the one the others reach. A tab brought to the
+            front takes that over by itself; this is for the one visible but not focused.
+          */}
+          {state.groupDisplaced && (
+            <div className="alert alert--soft alert__row">
+              <span>{t("devices.displaced")}</span>
+              <button type="button" className="btn btn--ghost btn--small" onClick={() => client.useThisTab()}>
+                {t("devices.useThisTab")}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
-        <div
-          className={dragging ? "dropzone dropzone--active" : "dropzone"}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setDragging(true);
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={(event) => {
-            event.preventDefault();
-            setDragging(false);
-            add(event.dataTransfer.files);
-          }}
-        >
-          <span className="dropzone__glyph" aria-hidden="true">
-            ↑
-          </span>
-          <p className="dropzone__hint">{t("landing.dropHere")}</p>
-          <button
-            type="button"
-            className="btn btn--secondary btn--block"
-            onClick={() => fileInput.current?.click()}
-          >
-            {t("landing.chooseFiles")}
-          </button>
+      <form onSubmit={join}>
+        <CodeBoxes value={code} caret={caret} label={t("landing.codeLabel")}>
+          {/*
+            The real input sits invisibly over the boxes: taps focus it, the numeric
+            keyboard opens, autofill still works, and the boxes render its value.
+          */}
           <input
-            ref={fileInput}
-            type="file"
-            multiple
-            hidden
-            onChange={(event) => add(event.target.files)}
+            ref={codeInput}
+            className="code-input"
+            value={code}
+            onChange={(event) => {
+              const next = event.target.value.replace(/\D/g, "").slice(0, CODE_LENGTH);
+              onCode(next);
+              // The last digit is the whole request, so it is taken as one: no button to
+              // find, which on a phone also meant putting the keyboard away first.
+              if (next.length === CODE_LENGTH && code.length < CODE_LENGTH) client.join(next);
+            }}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            aria-label={t("landing.codeLabel")}
+            aria-describedby="code-help"
           />
+        </CodeBoxes>
+      </form>
+
+      <div className="home__under">
+        {/* A failed join is reported where the digits were typed, without moving them. */}
+        {error ? (
+          <p className="home__error" id="code-help" role="alert">
+            {error}
+            {code.length === CODE_LENGTH && (
+              <button type="button" className="btn btn--text" onClick={() => client.join(code)}>
+                {t("landing.joinAgain")}
+              </button>
+            )}
+          </p>
+        ) : (
+          <p id="code-help">{t("landing.qrHint")}</p>
+        )}
+        <Stamps />
+      </div>
+
+      <section className="strip" aria-labelledby="send-title">
+        <div className="strip__title">
+          <h2 id="send-title">{t("landing.sendTitle")}</h2>
+          {files.length > 0 ? (
+            <p className="staged">
+              <b>{t("landing.staged", { count: files.length, size: formatBytes(stagedBytes) })}</b>
+              <button type="button" className="btn btn--text" onClick={() => setFiles([])}>
+                {t("landing.clear")}
+              </button>
+            </p>
+          ) : (
+            <p>{t("landing.dropAnywhere")}</p>
+          )}
         </div>
 
-        <div className="composer" style={{ marginTop: 14 }}>
+        <div className="strip__row">
+          <button type="button" className="btn btn--ghost" onClick={() => fileInput.current?.click()}>
+            {t("landing.chooseFiles")}
+          </button>
+          <input ref={fileInput} type="file" multiple hidden onChange={(event) => add(event.target.files)} />
           <input
-            className="composer__input"
+            className="field"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              // Not while an input method is still composing: that Enter picks a word.
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) start();
+            }}
             placeholder={t("landing.textPlaceholder")}
             aria-label={t("landing.textLabel")}
           />
         </div>
 
-        {files.length > 0 && (
-          <p className="alert alert--soft" style={{ marginTop: 14 }}>
-            {t("landing.staged", { count: files.length, size: formatBytes(stagedBytes) })}
-            <button
-              type="button"
-              className="btn btn--ghost btn--tiny"
-              style={{ marginLeft: 10 }}
-              onClick={() => setFiles([])}
-            >
-              {t("landing.clear")}
-            </button>
-          </p>
-        )}
+        <button type="button" className="btn" onClick={start}>
+          {t("landing.getCode")}
+        </button>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 18, marginTop: 22 }}>
-          <button type="button" className="btn btn--primary btn--lg" onClick={start}>
-            {t("landing.getCode")}
-          </button>
-          <span className="enter-hint">↵ enter</span>
-        </div>
+        <span className="strip__sep" aria-hidden="true" />
 
-        {!staged && (
-          <p className="sub" style={{ marginTop: 16, maxWidth: "48ch" }}>
-            {t("landing.receiveOnly")}
-          </p>
-        )}
-      </div>
+        <DeviceChips
+          client={client}
+          state={state}
+          files={files}
+          text={draft}
+          managing={managing}
+          onManage={() => setManaging((open) => !open)}
+        />
+      </section>
 
-      <div className="screen__rule" aria-hidden="true" />
-
-      <div>
-        <DeviceList client={client} state={state} files={files} text={draft} />
-
-        <hr className="hr" />
-
-        <h4 className="side-title">{t("landing.orJoin")}</h4>
-        <p className="sub" style={{ marginBottom: 14 }}>
-          {t("landing.joinSub")}
-        </p>
-
-        <form className="code-form" onSubmit={join}>
-          <div className="code-entry">
-            {Array.from({ length: CODE_LENGTH }, (_, index) => {
-              const digit = code[index];
-              const active = focused && index === Math.min(code.length, CODE_LENGTH - 1);
-              const cls = [
-                "code-entry__cell",
-                digit === undefined && "code-entry__cell--empty",
-                active && "code-entry__cell--active",
-              ]
-                .filter(Boolean)
-                .join(" ");
-              return (
-                <span key={index} className={cls}>
-                  {digit ?? (active ? <span className="code-entry__caret">▏</span> : "0")}
-                </span>
-              );
-            })}
-            {/*
-              The real input sits invisibly over the cells: taps focus it, the numeric
-              keyboard opens, autofill still works, and the cells render its value.
-            */}
-            <input
-              ref={codeInput}
-              className="code-input"
-              value={code}
-              onChange={(event) => {
-                const next = event.target.value.replace(/\D/g, "").slice(0, CODE_LENGTH);
-                setCode(next);
-                // The last digit is the whole request, so it is taken as one: no button to
-                // find, which on a phone also meant putting the keyboard away first.
-                if (next.length === CODE_LENGTH && code.length < CODE_LENGTH) client.join(next);
-              }}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              aria-label={t("landing.codeLabel")}
-            />
-          </div>
-          <button
-            type="submit"
-            className="btn btn--secondary"
-            disabled={code.length !== CODE_LENGTH}
-          >
-            {t("landing.join")}
-          </button>
-        </form>
-
-        <hr className="hr" />
-        <div className="footnote">
-          <span>{t("landing.qrHint")}</span>
-        </div>
-      </div>
+      {managing && <DeviceManager client={client} state={state} />}
     </section>
   );
 }

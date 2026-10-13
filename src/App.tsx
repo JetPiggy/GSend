@@ -1,18 +1,16 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
-import type { ConnectionPath } from "../shared/protocol";
 import { GSendClient, type Snapshot } from "./core/client";
 import { collectShare } from "./core/share";
-import { formatBytes, prepareStorage } from "./core/sink";
-import { useI18n, type Translator } from "./i18n";
+import { directPickerSupported, formatBytes, maxFileBytes, prepareStorage } from "./core/sink";
+import { useI18n, type MessageKey, type Translator } from "./i18n";
+import { useDropGuard } from "./ui/drop";
 import Landing from "./ui/Landing";
 import HostPanel from "./ui/HostPanel";
 import PairingPanel from "./ui/PairingPanel";
 import TransferPanel, { TransferRow } from "./ui/TransferPanel";
+import { setWork, useWork } from "./ui/work";
 
 const client = new GSendClient();
-
-/** The host this copy is served from: the same Worker answers on more than one. */
-const HOST = location.host;
 
 /** Module scope so React StrictMode's double mount cannot join twice. */
 let autoJoinHandled = false;
@@ -26,13 +24,20 @@ export default function App() {
   const state = useSyncExternalStore(client.subscribe, client.getSnapshot);
   const i18n = useI18n();
   const { t, toggle } = i18n;
-  const [prefill, setPrefill] = useState("");
+  const work = useWork();
+  // The code being typed lives here, not on the home screen: a join that fails comes
+  // back to a freshly mounted home screen, which should still show the digits tried.
+  const [code, setCode] = useState("");
+  const [limit, setLimit] = useState(() => maxFileBytes());
+
+  useDropGuard();
 
   useEffect(() => {
     // Settle the storage probe here rather than on the landing screen, which never
     // renders when someone arrives by QR code or link, and go online for the paired
     // devices. Both guard themselves, so neither belongs behind the auto-join latch.
-    void prepareStorage();
+    // The per-file ceiling depends on whether this browser will actually give us disk.
+    void prepareStorage().then(() => setLimit(maxFileBytes()));
     void client.wake();
 
     if (autoJoinHandled) return;
@@ -50,59 +55,77 @@ export default function App() {
 
     // A fresh code in the URL is an explicit request to join, so it outranks whatever
     // session this tab was in before.
-    const code = readCodeFromUrl();
-    if (code) {
-      setPrefill(code);
+    const linked = readCodeFromUrl();
+    if (linked) {
+      setCode(linked);
       history.replaceState(null, "", location.pathname);
-      client.join(code);
+      client.join(linked);
       return;
     }
 
     client.restore();
   }, []);
 
+  // Once a join gets through, or this device starts a session of its own, the digits
+  // have done their job.
+  useEffect(() => {
+    if (state.phase !== "idle" && state.phase !== "joining") setCode("");
+  }, [state.phase]);
+
   const pairing = state.phase === "joining" || state.phase === "pairing";
   const inSession = state.phase !== "idle" && state.phase !== "ended";
   // A restored or reconnecting session is still "pairing" while it re-attaches, and it
   // may already be holding files. Anything with contents shows the list, not the wait.
-  const hasContents =
-    state.incoming.length > 0 || state.outgoing.length > 0 || state.texts.length > 0;
+  const hasContents = state.incoming.length > 0 || state.outgoing.length > 0 || state.texts.length > 0;
   const showTransfers = state.phase === "active" || (pairing && hasContents);
+
+  // Two sentences rather than one interpolation: "up to your free disk per file" is not
+  // a sentence, and the two cases are genuinely different claims.
+  const limitLine = directPickerSupported()
+    ? t("landing.limitDisk")
+    : t("landing.limitSize", { size: formatBytes(limit) });
 
   return (
     <div className="app">
       <header className="app__header">
-        <button
-          type="button"
-          className="brand"
-          onClick={() => client.reset()}
-          aria-label={t("app.back")}
-        >
-          <span className="brand__mark" aria-hidden="true" />
-          GSend
+        <button type="button" className="brand" onClick={() => client.reset()} aria-label={t("app.back")}>
+          <img className="brand__face brand-only" src="/img/face-nav.png" alt="" width={44} height={44} />
+          <span className="brand__name">GSend</span>
         </button>
-        {state.phase === "idle" && <span className="header-host">{HOST}</span>}
+        <a className="by" href="https://jetpiggy.com" target="_blank" rel="noopener">
+          {t("app.by")}
+        </a>
+        <span className="header__spacer" />
         {inSession && state.channelsOpen && <StatusChip state={state} i18n={i18n} />}
-        <button
-          type="button"
-          className="btn btn--ghost"
-          onClick={toggle}
-          title={t("app.language")}
-        >
-          {t("app.languageShort")}
-        </button>
-        {state.phase !== "idle" && (
-          <button type="button" className="btn btn--secondary" onClick={() => client.leave()}>
-            {t("app.endSession")}
+        <div className="header__tools">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={work}
+            className="switch"
+            title={t("app.workHint")}
+            onClick={() => setWork(!work)}
+          >
+            <span className="switch__track" aria-hidden="true">
+              <span className="switch__knob" />
+            </span>
+            <span className="switch__long">{t("app.work")}</span>
+            <span className="switch__short">{t("app.workShort")}</span>
           </button>
-        )}
+          <button type="button" className="lang" onClick={toggle} title={t("app.language")} lang={i18n.language === "en" ? "zh-Hant-HK" : "en"}>
+            {t("app.languageShort")}
+          </button>
+          {inSession && (
+            <button type="button" className="btn btn--ghost btn--small" onClick={() => client.leave()}>
+              {t("app.endSession")}
+            </button>
+          )}
+        </div>
       </header>
 
       <main className="app__main">
-        {state.phase === "idle" && <Landing client={client} state={state} prefill={prefill} />}
-        {(state.phase === "creating" || state.phase === "hosting") && (
-          <HostPanel client={client} state={state} />
-        )}
+        {state.phase === "idle" && <Landing client={client} state={state} code={code} onCode={setCode} limitLine={limitLine} />}
+        {(state.phase === "creating" || state.phase === "hosting") && <HostPanel client={client} state={state} />}
         {pairing && !showTransfers && <PairingPanel client={client} state={state} />}
         {/*
           The panel stays up even while the connection is degraded. A received file on
@@ -115,33 +138,22 @@ export default function App() {
 
       <footer className="app__footer">
         <span>{t("app.footer")}</span>
-        <a className="app__footer-link" href="/privacy">
-          {t("app.privacy")}
-        </a>
+        {state.phase === "idle" && <span>{limitLine}</span>}
+        <a href="/privacy">{t("app.privacy")}</a>
       </footer>
     </div>
   );
 }
 
-/**
- * The route the bytes actually take, as measured. Whether relay servers were offered
- * says nothing about it: a connection given them usually still goes direct.
- */
-const ROUTE_WORD: Record<ConnectionPath, string | null> = {
-  lan: "lan",
-  internet: "direct",
-  relay: "relay",
-  unknown: null,
-};
-
-/** "已連線 · direct" in the header, per the design's CLI-flavoured status line. */
+/** "Connected · direct" in the header: the route the bytes actually take, as measured. */
 function StatusChip({ state, i18n }: { state: Snapshot; i18n: Translator }) {
   const online = state.connection === "connected" && state.channelsOpen;
-  const route = state.path ? ROUTE_WORD[state.path] : null;
   const label = online
-    ? route
-      ? `${i18n.t("status.connected")} · ${route}`
-      : i18n.t("status.connected")
+    ? state.path === "relay"
+      ? i18n.t("status.relayed")
+      : state.path === "lan" || state.path === "internet"
+        ? i18n.t("status.direct")
+        : i18n.t("status.connected")
     : state.peerAbsentSince !== null && !state.channelsOpen
       ? i18n.t("status.peerAway")
       : state.connection === "reconnecting"
@@ -151,12 +163,30 @@ function StatusChip({ state, i18n }: { state: Snapshot; i18n: Translator }) {
           : i18n.t("status.connecting");
 
   return (
-    <span className={online ? "status" : "status status--warn"}>
+    <span className={online ? "status" : "status status--warn"} role="status">
       <span className="status__dot" aria-hidden="true" />
       {label}
     </span>
   );
 }
+
+/** Endings that were nobody's choice, where the pig has crashed rather than landed. */
+const MISHAPS: ReadonlySet<MessageKey> = new Set([
+  "error.nobodyJoined",
+  "error.deviceUnreachable",
+  "error.deviceBusy",
+  "error.unknownDevice",
+  "error.expiredWhileAway",
+  "error.serverLost",
+  "error.peerGone",
+  "server.code_not_found",
+  "server.code_expired",
+  "server.session_full",
+  "server.bad_key",
+  "server.rate_limited",
+  "server.no_capacity",
+  "server.bad_request",
+]);
 
 function EndedScreen({ state, i18n }: { state: Snapshot; i18n: Translator }) {
   const { t, tm } = i18n;
@@ -178,71 +208,85 @@ function EndedScreen({ state, i18n }: { state: Snapshot; i18n: Translator }) {
   const showRetry = retry !== null && (retry.device === null || retryDevice != null);
   const retryWaiting = retryDevice != null && !retryDevice.online;
   const queued = state.pendingShare;
+  const mishap = !hasSummary && state.error !== null && MISHAPS.has(state.error.key);
 
   return (
     <section className="ended">
-      <div className="kicker kicker--muted">{t("ended.kicker")}</div>
-      <h2 className="display display--md">{t("ended.title")}</h2>
-      <p className="ended__lede">{tm(state.error) ?? t("ended.default")}</p>
-      {state.pairing?.offer === "paired" && (
-        <p className="ended__lede">{t("remember.paired", { name: state.pairing.name })}</p>
-      )}
-      {hasSummary && (
-        <div className="term term--muted">
-          {`sent      ${sent.length} · ${formatBytes(sentBytes)}\nreceived  ${received.length} · ${formatBytes(receivedBytes)}`}
-        </div>
-      )}
-      {showRetry && queued && (
-        <div className="term term--muted">
-          {`queued    ${[
-            queued.files > 0 ? `${queued.files} · ${formatBytes(queued.bytes)}` : null,
-            queued.text ? "text" : null,
-          ]
-            .filter(Boolean)
-            .join(" · ")}`}
-        </div>
-      )}
-      {held.length > 0 && (
-        <div className="ended__held">
-          {unsaved > 0 && <p className="ended__lede">{t("ended.unsaved")}</p>}
-          {state.notice && (
-            <p className="alert alert--soft" onClick={() => client.dismissNotice()}>
-              {tm(state.notice)}
-            </p>
-          )}
-          <ul className="transfers">
-            {held.map((transfer) => (
-              <TransferRow key={transfer.id} transfer={transfer} client={client} i18n={i18n} cells={10} />
-            ))}
-          </ul>
-          {unsaved > 1 && (
-            <button type="button" className="btn btn--secondary" onClick={() => void client.saveAll()}>
-              {t("transfer.saveAll")} <span className="session-head__count">{unsaved}</span>
+      <img
+        className={mishap ? "ended__pig ended__pig--crash brand-only" : "ended__pig brand-only"}
+        src={mishap ? "/img/crash.webp" : "/img/face-smile.webp"}
+        alt=""
+        width={mishap ? 640 : 240}
+        height={mishap ? 384 : 240}
+      />
+      <div className="sheet">
+        <h2>{t("ended.title")}</h2>
+        <p className="ended__lede">{tm(state.error) ?? t("ended.default")}</p>
+        {state.pairing?.offer === "paired" && (
+          <p className="ended__lede">{t("remember.paired", { name: state.pairing.name })}</p>
+        )}
+        {(hasSummary || (showRetry && queued)) && (
+          <dl className="facts">
+            {sent.length > 0 && (
+              <>
+                <dt>{t("ended.sent")}</dt>
+                <dd>{t("ended.count", { count: sent.length, size: formatBytes(sentBytes) })}</dd>
+              </>
+            )}
+            {received.length > 0 && (
+              <>
+                <dt>{t("ended.received")}</dt>
+                <dd>{t("ended.count", { count: received.length, size: formatBytes(receivedBytes) })}</dd>
+              </>
+            )}
+            {showRetry && queued && (
+              <>
+                <dt>{t("ended.queued")}</dt>
+                <dd>
+                  {[
+                    queued.files > 0 ? t("ended.count", { count: queued.files, size: formatBytes(queued.bytes) }) : null,
+                    queued.text ? t("ended.text") : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </dd>
+              </>
+            )}
+          </dl>
+        )}
+        {held.length > 0 && (
+          <div className="ended__held">
+            {unsaved > 0 && <p className="ended__lede">{t("ended.unsaved")}</p>}
+            {state.notice && (
+              <p className="alert alert--soft" onClick={() => client.dismissNotice()}>
+                {tm(state.notice)}
+              </p>
+            )}
+            <ul className="transfers">
+              {held.map((transfer) => (
+                <TransferRow key={transfer.id} transfer={transfer} client={client} i18n={i18n} />
+              ))}
+            </ul>
+            {unsaved > 1 && (
+              <div>
+                <button type="button" className="btn btn--ghost" onClick={() => void client.saveAll()}>
+                  {t("transfer.saveAll")} · {unsaved}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {retryWaiting && <p className="ended__lede">{t("ended.retryOffline", { name: retryDevice.name })}</p>}
+        <div className="ended__actions">
+          {showRetry && (
+            <button type="button" className="btn" disabled={retryWaiting} onClick={() => client.retry()}>
+              {t("ended.retry")}
             </button>
           )}
-        </div>
-      )}
-      {retryWaiting && (
-        <p className="ended__lede">{t("ended.retryOffline", { name: retryDevice.name })}</p>
-      )}
-      <div className="ended__actions">
-        {showRetry && (
-          <button
-            type="button"
-            className="btn btn--primary btn--lg"
-            disabled={retryWaiting}
-            onClick={() => client.retry()}
-          >
-            {t("ended.retry")}
+          <button type="button" className={showRetry ? "btn btn--ghost" : "btn"} onClick={() => client.reset()}>
+            {t("ended.startOver")}
           </button>
-        )}
-        <button
-          type="button"
-          className={showRetry ? "btn btn--secondary btn--lg" : "btn btn--primary btn--lg"}
-          onClick={() => client.reset()}
-        >
-          {t("ended.startOver")}
-        </button>
+        </div>
       </div>
     </section>
   );

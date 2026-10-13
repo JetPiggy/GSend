@@ -3,17 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="light" />
     <meta
       name="description"
-      content="Send files and text between your devices. Browser to browser, nothing stored on a server."
+      content="Send files and text between your devices. No cables, no chat apps: browser to browser, nothing stored on a server."
     />
     <title>GSend — device to device transfer</title>
+    <!-- Work mode is decided before the first paint, so the pig never flashes up on a
+         screen that asked for words only. src/ui/work.ts owns it from here. -->
+    <script>
+      (function () {
+        var on = false;
+        try { on = localStorage.getItem("gsend.work") === "1"; } catch (e) {}
+        if (new URLSearchParams(location.search).get("w") === "1") on = true;
+        if (on) document.documentElement.classList.add("work");
+      })();
+    </script>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <meta name="theme-color" content="#edf1f8" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)" />
+    <link rel="preload" href="/fonts/TitanOne.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/huninn.woff2" as="font" type="font/woff2" crossorigin />
+    <meta name="theme-color" content="#F7F3E8" />
     <meta name="mobile-web-app-capable" content="yes" />
     <!-- iOS still reads the vendor-prefixed pair; it is what gives an installed copy
          its own storage treatment rather than sharing Safari's. -->

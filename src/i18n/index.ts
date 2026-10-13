@@ -36,7 +36,7 @@ let current: Language = detect();
 const listeners = new Set<() => void>();
 
 function applyDocumentLanguage(): void {
-  document.documentElement.lang = current === "zh" ? "zh-Hant" : "en";
+  document.documentElement.lang = current === "zh" ? "zh-Hant-HK" : "en";
 }
 
 applyDocumentLanguage();
