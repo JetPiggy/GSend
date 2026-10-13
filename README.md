@@ -2,8 +2,9 @@
 
 Send files and text straight from one browser to another. Pick what to send, hand over
 a 4-digit code, and the other device receives it the moment it enters the code — over a
-direct WebRTC connection, so the files never touch a server. Pair two devices once and
-the code stops being necessary between them: they find each other on their own.
+direct WebRTC connection, so the files never touch a server. Have two devices remember
+each other once and the code stops being necessary between them: they find each other
+on their own.
 
 Live at **[gsend.cc](https://gsend.cc)**.
 
@@ -24,8 +25,9 @@ Browser A  ──WebSocket──►  Cloudflare Worker  ◄──WebSocket──
 4. The queue starts moving as soon as the data channel opens — no second confirmation.
    **A** sees the device arrive and can stop the session at any point.
 5. Both sides stay connected and can keep sending files and text until either closes
-   the page. They also remember each other, so the next transfer between them needs no
-   code at all.
+   the page. If both people press "Remember", the two devices also remember each other,
+   so the next transfer between them needs no code at all. Nothing is remembered
+   otherwise: sending one file to someone does not put them in your device list.
 
 The server's only job is introductions. It stores a session's keys and expiry in a
 Durable Object and nothing else — no accounts, no database, no file storage, no logs
@@ -49,8 +51,9 @@ is the cost of the shorter path; a distributed attacker with enough addresses to
 Resuming after a network drop uses a 256-bit session key, not the code.
 
 **Paired devices are a different problem**, because no code is involved at all. Each
-browser generates a keypair whose private half is non-extractable, and a pairing done
-over a code records the other side's public key. From then on both devices derive the
+browser generates a keypair whose private half is non-extractable, and a pairing — made
+during a code session, and only once both people have asked for it — records the other
+side's public key. From then on both devices derive the
 same signalling room name from a shared 256-bit secret, so they meet without the server
 holding any membership, account or device list — it only ever sees an opaque name, and
 one that is recomputed every six hours so it cannot become a lasting label. Knowing that
@@ -182,14 +185,29 @@ acknowledges bytes only once they are on storage, and the sender pauses while it
 than 32 MB ahead of those acknowledgements, so a USB stick or a busy phone sets the pace
 of the transfer instead of filling the tab until it crashes.
 
-**Devices remember each other after one pairing.** A browser generates a keypair on
-first use and keeps it, with the devices it has paired with, in IndexedDB. Pairing rides
-on the ordinary code flow: once the channel is open the two sides exchange public keys,
-prove them by signing each other's nonce, and one hands over the group secret. After
-that they appear in each other's device list with live presence, and sending is one
-click with no code, no QR and no typing. The destination folder is remembered too, so a
-file sent to a paired device is written where it belongs without anyone touching the
-receiving machine.
+**Devices remember each other after one pairing, if both people ask.** A browser
+generates a keypair on first use and keeps it, with the devices it has paired with, in
+IndexedDB. Pairing rides on the ordinary code flow: once the channel is open the two
+sides exchange public keys and prove them by signing each other's nonce. The proof on
+its own records nothing. Each screen then offers "Remember", and only once both people
+have pressed it does one side hand over the group secret and each write the other down;
+whoever pressed first sees that it is waiting for the other. Every code session used to
+pair the two devices automatically, so one file sent to a colleague put them in your
+group for good: they saw when your other devices were online, and your device answered
+their calls without asking. A yes cannot be taken back within the session, because one
+withdrawn while the other side's was on its way would leave one device paired and the
+other not; "Unpair" undoes it afterwards. Once paired, the two appear in each other's
+device list with live presence, and sending is one click with no code, no QR and no
+typing. The destination folder is remembered too, so a file sent to a paired device is
+written where it belongs without anyone touching the receiving machine.
+
+A tab still running a build from before this pairs the old way, on its own, the moment
+the proof is through: it lists the newer device at once, and if it is the side that
+hands over its group, it sends the secret unasked. The newer device keeps that secret
+without using it and offers "Remember" as usual. Pressing it completes the pairing on
+both sides, since the older tab has already agreed in its own way. Not pressing it
+leaves the older tab listing a device that never comes online, until it is unpaired
+there.
 
 Presence works because the group's signalling room is addressed by a name derived from
 the shared secret, and the Worker addresses rooms by name alone. That means the whole
