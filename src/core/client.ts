@@ -20,7 +20,7 @@ import {
 } from "./sink";
 import { forgetDevice, forgetGroup, groupSecret, knownDevices, type KnownDevice } from "./devices";
 import { GroupLink } from "./group";
-import { Handshake, isHandshakeMessage } from "./handshake";
+import { Handshake, isHandshakeMessage, type PairOffer } from "./handshake";
 import { loadIdentity, renameDevice, type Identity } from "./identity";
 import type { PeerControl } from "./protocol";
 import { Signaling } from "./signaling";
@@ -78,6 +78,12 @@ export interface Snapshot {
   peerDevice: string | null;
   /** Whether the peer has proved which device it is. Required before anything moves in group mode. */
   verified: boolean;
+  /**
+   * In a code session whose peer has proved which device it is: whether the two are
+   * going to remember each other, and the name it gave. Null otherwise, a device
+   * session included, since its two ends are paired already.
+   */
+  pairing: { offer: PairOffer; name: string } | null;
   /** The folder incoming files are being written into, when one was chosen. */
   savingTo: string | null;
   /** When the other device came through, so the sender can see it happen. */
@@ -238,6 +244,15 @@ export class GSendClient {
    */
   private heldControl: string[] = [];
   private verified = false;
+  /** How far this code session has got towards the two devices remembering each other. */
+  private pairOffer: PairOffer | null = null;
+  /** The name the peer gave when it proved itself. */
+  private peerName: string | null = null;
+  /**
+   * The person here asked to remember the peer. Kept by the session rather than the
+   * handshake, because a handshake cut off by a reconnect starts over and is asked again.
+   */
+  private wantPair = false;
   private woken = false;
   /** Kept so a group session can attach the engine once the peer has proved itself. */
   private openChannels: PeerChannels | null = null;
@@ -734,6 +749,16 @@ ${trimmed}` : trimmed;
     }
   }
 
+  /**
+   * Ask to remember the device at the other end of this code session. Nothing is
+   * recorded until the person there asks too.
+   */
+  rememberPeer(): void {
+    if (this.mode !== "code" || this.wantPair) return;
+    this.wantPair = true;
+    this.handshake?.consent();
+  }
+
   dismissNotice(): void {
     this.notice = null;
     this.emitNow();
@@ -1216,8 +1241,8 @@ ${trimmed}` : trimmed;
 
   /**
    * Both sides announce themselves the moment the control channel is up. In a code
-   * session this only records a pairing for next time and never blocks the transfer,
-   * so a peer running an older build still works; in a group session it is the gate.
+   * session this only makes a pairing possible and never blocks the transfer, so a peer
+   * running an older build still works; in a group session it is the gate.
    */
   private startHandshake(): void {
     const identity = this.identity;
@@ -1225,10 +1250,13 @@ ${trimmed}` : trimmed;
 
     this.handshake = new Handshake(identity, this.mode, {
       send: (msg) => this.peer?.sendControl(JSON.stringify(msg)),
-      onVerified: ({ stranded }) => {
+      onVerified: (device) => {
         this.verified = true;
-        if (stranded > 0) this.notice = { key: "notice.regrouped", params: { count: stranded } };
-        void this.refreshDevices();
+        this.peerName = device.name;
+        // A paired device's name is kept current each time the two meet.
+        if (this.mode === "group") void this.refreshDevices();
+        // Asked before a reconnect made the proof start over; the answer still stands.
+        if (this.wantPair) this.handshake?.consent();
 
         if (this.openChannels) this.transfer.attach(this.openChannels);
         this.phase = "active";
@@ -1238,6 +1266,16 @@ ${trimmed}` : trimmed;
         this.releaseHeldControl();
         this.flushPendingShare();
         this.emitNow();
+      },
+      onPairing: (offer) => {
+        this.pairOffer = offer;
+        this.emitNow();
+      },
+      onPaired: (stranded) => {
+        this.pairOffer = "paired";
+        if (stranded > 0) this.notice = { key: "notice.regrouped", params: { count: stranded } };
+        // The pairing may have just created or changed the group this device goes online in.
+        void this.refreshDevices();
       },
       onRejected: () => {
         this.heldControl = [];
@@ -1253,12 +1291,18 @@ ${trimmed}` : trimmed;
   /**
    * A handshake cut off by the channels closing would wait forever for messages that
    * went down with them, and a device session would never be allowed to carry anything.
-   * One that had not finished is dropped, so the next channels start it afresh.
+   * One that had not finished is dropped, so the next channels start it afresh. A code
+   * session's is finished only once it has paired: the other side may have reloaded and
+   * be proving itself from scratch, and an offer to pair it could not answer would wait
+   * for ever.
    */
   private forgetUnfinishedHandshake(): void {
-    if (this.verified) return;
+    const finished = this.mode === "group" ? this.verified : this.pairOffer === "paired";
+    if (finished) return;
     this.handshake = null;
     this.heldControl = [];
+    this.verified = false;
+    this.pairOffer = null;
   }
 
   private onPeerControl(raw: string): void {
@@ -1500,6 +1544,9 @@ ${trimmed}` : trimmed;
     this.handshake = null;
     this.heldControl = [];
     this.verified = false;
+    this.pairOffer = null;
+    this.peerName = null;
+    this.wantPair = false;
     this.texts = [];
     this.pendingFiles = [];
     this.pendingText = null;
@@ -1598,6 +1645,10 @@ ${trimmed}` : trimmed;
       groupDisplaced: this.group.displaced,
       peerDevice: this.peerDevice,
       verified: this.verified,
+      pairing:
+        this.mode === "code" && this.pairOffer !== null
+          ? { offer: this.pairOffer, name: this.peerName ?? "" }
+          : null,
       savingTo: saveDirectoryName(),
       peerJoinedAt: this.peerJoinedAt,
       outgoing: this.transfer.snapshotOutgoing(),

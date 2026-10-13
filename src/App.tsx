@@ -184,6 +184,9 @@ function EndedScreen({ state, i18n }: { state: Snapshot; i18n: Translator }) {
       <div className="kicker kicker--muted">{t("ended.kicker")}</div>
       <h2 className="display display--md">{t("ended.title")}</h2>
       <p className="ended__lede">{tm(state.error) ?? t("ended.default")}</p>
+      {state.pairing?.offer === "paired" && (
+        <p className="ended__lede">{t("remember.paired", { name: state.pairing.name })}</p>
+      )}
       {hasSummary && (
         <div className="term term--muted">
           {`sent      ${sent.length} · ${formatBytes(sentBytes)}\nreceived  ${received.length} · ${formatBytes(receivedBytes)}`}

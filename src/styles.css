@@ -334,6 +334,20 @@ body {
   cursor: pointer;
 }
 
+/* A code session's offer to remember the other device: a line of text and its button. */
+.remember {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 14px;
+  padding: 10px 16px;
+  border: 1px solid var(--color-divider);
+  border-left: 2px solid var(--color-accent);
+  border-radius: var(--radius-md);
+}
+.remember__text { flex: 1 1 240px; min-width: 0; margin: 0; font-size: 13px; line-height: 1.7; color: var(--ink-70); }
+
 /* ── code entry (landing) ──────────────────────────────────────────────── */
 
 /* Cells and the join button share one row, so the whole block fits a phone screen. */

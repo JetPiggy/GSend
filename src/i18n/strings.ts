@@ -94,6 +94,15 @@ export const en = {
   "transfer.relayNote":
     "No direct route was found between these two devices, so this connection runs through a relay server and is slower. Putting both on the same Wi-Fi usually allows a direct one — unless the network keeps its devices apart, as guest Wi-Fi often does.",
 
+  "remember.open":
+    "Remember {name}? Once you both agree, each device appears in the other's list and the next transfer between them needs no code.",
+  "remember.asked":
+    "{name} asked to remember this device. Agree too, and the next transfer between you needs no code.",
+  "remember.waiting": "Waiting for {name} to agree. Nothing is remembered until it does.",
+  "remember.paired": "{name} is now in your devices. Unpair it there at any time.",
+  "remember.ask": "Remember",
+  "remember.agree": "Remember it too",
+
   "status.connected": "Connected",
   "status.peerAway": "The other device dropped off — waiting for it to come back",
   "status.reconnecting": "Reconnecting…",
@@ -127,7 +136,7 @@ export const en = {
   "devices.unpair": "Unpair",
   "devices.unpairAll": "Forget every device",
   "devices.none":
-    "No paired devices yet. Pair one with a code below — just once — and it appears here from then on.",
+    "No paired devices yet. Connect to one with a code below and both choose Remember — just once — and it appears here from then on.",
   "devices.offlineNote": "A device shows up here while this page is open on it.",
   "devices.connecting": "Connecting to {name}…",
   "devices.verifying": "Checking that this really is {name}…",
@@ -259,6 +268,13 @@ export const zh: Record<MessageKey, string> = {
   "transfer.limitDisk": "磁碟",
   "transfer.relayNote": "這兩台裝置之間找不到直接的路徑,所以這次改經由中繼伺服器傳輸,速度會比較慢。讓兩台裝置連同一個 Wi-Fi 通常就能直連——除非那個網路刻意把裝置彼此隔開,訪客 Wi-Fi 常常這樣。",
 
+  "remember.open": "要記住「{name}」嗎?雙方都同意後,兩台裝置會出現在彼此的清單裡,下次互傳就不用數字碼。",
+  "remember.asked": "「{name}」想記住這台裝置。你也同意的話,下次你們之間互傳就不用數字碼。",
+  "remember.waiting": "正在等「{name}」同意。對方同意之前,什麼都不會被記住。",
+  "remember.paired": "「{name}」已加入你的裝置清單,隨時可以在那裡解除配對。",
+  "remember.ask": "記住",
+  "remember.agree": "我也要記住",
+
   "status.connected": "已連線",
   "status.peerAway": "另一台裝置離線了——正在等它回來",
   "status.reconnecting": "重新連線中…",
@@ -288,7 +304,7 @@ export const zh: Record<MessageKey, string> = {
   "devices.rename": "重新命名",
   "devices.unpair": "解除配對",
   "devices.unpairAll": "忘記所有裝置",
-  "devices.none": "還沒有配對過的裝置。用下面的數字碼配對一次,之後它就會固定出現在這裡。",
+  "devices.none": "還沒有配對過的裝置。用下面的數字碼連線一次、雙方都按「記住」,之後它就會固定出現在這裡。",
   "devices.offlineNote": "裝置只要開著這個頁面,就會出現在這份清單上。",
   "devices.connecting": "正在連線到「{name}」…",
   "devices.verifying": "正在確認對方真的是「{name}」…",

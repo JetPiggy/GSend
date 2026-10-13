@@ -47,10 +47,20 @@ export const AUTH_LABEL = "gsend-auth-v1:";
 export type PeerControl =
   /**
    * Who this device claims to be. Sent by both sides the moment the control channel
-   * opens. `devices` decides which side's group survives when two already-paired
-   * devices meet: the larger group keeps its secret, since it has more to lose.
+   * opens. `devices` decides which side's group survives when two devices pair: the
+   * larger group keeps its secret, since it has more to lose. `consent` says this build
+   * pairs over a code only once both people have asked to; older builds leave it out
+   * and pair on their own as soon as the proof is through.
    */
-  | { t: "auth"; id: string; name: string; publicKey: string; nonce: string; devices: number }
+  | {
+      t: "auth";
+      id: string;
+      name: string;
+      publicKey: string;
+      nonce: string;
+      devices: number;
+      consent?: true;
+    }
   /** Signature over the peer's nonce, proving the private key behind the claim. */
   | { t: "auth-proof"; sig: string }
   /**
@@ -59,7 +69,13 @@ export type PeerControl =
    * retrying something that will never be allowed.
    */
   | { t: "auth-fail" }
-  /** The group secret, handed over once both sides have proved themselves. */
+  /**
+   * The person on this side of a code session asked to remember the other device. It
+   * cannot be taken back within the session, so neither side can pair while the other
+   * is withdrawing; "Unpair" undoes it afterwards.
+   */
+  | { t: "pair" }
+  /** The group secret, handed over once both sides have asked to pair. */
   | { t: "group-invite"; secret: string }
   | { t: "offer"; batchId: string; files: FileMeta[] }
   | { t: "accept"; batchId: string; offsets: Record<string, number> }

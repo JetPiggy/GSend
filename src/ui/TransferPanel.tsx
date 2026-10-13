@@ -111,6 +111,27 @@ export default function TransferPanel({ client, state }: Props) {
           </p>
         )}
 
+        {/*
+          Remembering is offered, never assumed: sending someone one file by code should
+          not put them in this device list for good. Both people have to ask.
+        */}
+        {state.pairing && (
+          <div className="remember">
+            <p className="remember__text">
+              {t(`remember.${state.pairing.offer}`, { name: state.pairing.name })}
+            </p>
+            {(state.pairing.offer === "open" || state.pairing.offer === "asked") && (
+              <button
+                type="button"
+                className={state.pairing.offer === "asked" ? "btn btn--primary btn--tiny" : "btn btn--secondary btn--tiny"}
+                onClick={() => client.rememberPeer()}
+              >
+                {t(state.pairing.offer === "asked" ? "remember.agree" : "remember.ask")}
+              </button>
+            )}
+          </div>
+        )}
+
         <ul className="transfers">
           {transfers.map((transfer) => (
             <TransferRow
