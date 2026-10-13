@@ -88,11 +88,13 @@ class OpfsPool {
     return typeof size === "number" ? size : 0;
   }
 
-  async write(id: string, offset: number, chunk: Uint8Array): Promise<void> {
-    // The chunk is a view onto the received frame, which the caller reuses, and
-    // transferring detaches whatever buffer it points at — so send a copy.
-    const copy = new Uint8Array(chunk);
-    await this.request({ t: "write", id, offset, data: copy.buffer }, [copy.buffer]);
+  /** Hands `data` to the worker, so the caller must not touch it afterwards. */
+  async write(id: string, offset: number, data: Uint8Array): Promise<void> {
+    // Transferring detaches the whole underlying buffer, so a view onto part of one is
+    // copied out first rather than taking its neighbours with it.
+    const owned =
+      data.byteOffset === 0 && data.byteLength === data.buffer.byteLength ? data : new Uint8Array(data);
+    await this.request({ t: "write", id, offset, data: owned.buffer }, [owned.buffer]);
   }
 
   async finish(id: string): Promise<void> {
@@ -264,6 +266,128 @@ async function freeName(dir: FileSystemDirectoryHandle, raw: string): Promise<st
 
 // --- sinks -----------------------------------------------------------------
 
+/** One write to storage per this many bytes received, rather than one per frame. */
+const BATCH_BYTES = 2 * 1024 * 1024;
+/** Bytes never wait longer than this for the rest of their batch, so a stall still lands them. */
+const BATCH_MAX_WAIT_MS = 250;
+
+/**
+ * Gathers the frames of one file into large writes. A frame carries under 64 KB, and
+ * writing each on its own costs a round trip into the browser's file machinery per
+ * frame: on a fast connection that overhead, not the disk or the network, was what
+ * set the speed. Batching makes it a thirtieth as many writes.
+ *
+ * Each write's promise settles when the batch holding it reaches storage, so a
+ * failure still surfaces through the frame that was lost.
+ */
+class WriteBatcher {
+  private buffer: Uint8Array<ArrayBuffer> | null = null;
+  private filled = 0;
+  /** Where in the file the buffer's first byte belongs. */
+  private start = 0;
+  private settle: Deferred | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  /** Batches reach storage one at a time, in order. */
+  private tail: Promise<void> = Promise.resolve();
+  private failure: unknown = null;
+  private closed = false;
+
+  /** `store` owns the bytes it is handed, and may keep or transfer them. */
+  constructor(
+    private readonly store: (offset: number, data: Uint8Array<ArrayBuffer>) => Promise<void>,
+  ) {}
+
+  write(offset: number, chunk: Uint8Array): Promise<void> {
+    if (this.failure !== null) return Promise.reject(this.failure);
+    if (this.closed) return Promise.reject(new Error("sink closed"));
+
+    // Frames arrive in order, so a gap means a resume rewound; never bridge one.
+    if (this.buffer) {
+      const contiguous = offset === this.start + this.filled;
+      if (!contiguous || this.filled + chunk.byteLength > this.buffer.byteLength) this.flush();
+    }
+
+    if (!this.buffer || !this.settle) {
+      this.buffer = new Uint8Array(Math.max(BATCH_BYTES, chunk.byteLength));
+      this.filled = 0;
+      this.start = offset;
+      this.settle = deferred();
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.flush();
+      }, BATCH_MAX_WAIT_MS);
+    }
+
+    // Copied in, so the caller's frame is free to go.
+    this.buffer.set(chunk, this.filled);
+    this.filled += chunk.byteLength;
+    const landed = this.settle.promise;
+    if (this.filled >= this.buffer.byteLength) this.flush();
+    return landed;
+  }
+
+  /** Put everything handed over so far on storage. */
+  async drain(): Promise<void> {
+    this.flush();
+    await this.tail;
+    if (this.failure !== null) throw this.failure;
+  }
+
+  /** Stop, dropping whatever has not been written yet. */
+  discard(): void {
+    this.closed = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    // Resolved rather than rejected: these bytes were let go on purpose, and a rejection
+    // would be reported as a write that failed.
+    this.settle?.resolve();
+    this.settle = null;
+    this.buffer = null;
+  }
+
+  private flush(): void {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    const buffer = this.buffer;
+    const settle = this.settle;
+    this.buffer = null;
+    this.settle = null;
+    if (!buffer || !settle) return;
+
+    const data = this.filled === buffer.byteLength ? buffer : buffer.subarray(0, this.filled);
+    const offset = this.start;
+    this.tail = this.tail
+      .then(() => {
+        if (this.failure !== null) throw this.failure;
+        if (this.closed) return;
+        return this.store(offset, data);
+      })
+      .then(
+        () => settle.resolve(),
+        (error: unknown) => {
+          this.failure ??= error;
+          settle.reject(error);
+        },
+      );
+  }
+}
+
+interface Deferred {
+  promise: Promise<void>;
+  resolve(): void;
+  reject(error: unknown): void;
+}
+
+function deferred(): Deferred {
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 /**
  * Streams into the person's own folder. Chrome writes through a swap file that is only
  * committed on close, so a dropped connection is survivable — the stream stays open
@@ -272,14 +396,18 @@ async function freeName(dir: FileSystemDirectoryHandle, raw: string): Promise<st
  * a reloaded page from claiming it can resume one of these.
  */
 class DiskSink implements FileSink {
-  /** Writes are queued rather than issued concurrently, so bytes land in order. */
-  private tail: Promise<void> = Promise.resolve();
+  private readonly batcher: WriteBatcher;
 
   private constructor(
     private readonly directory: FileSystemDirectoryHandle,
     private stream: FileSystemWritableFileStream | null,
     readonly savedAs: string,
-  ) {}
+  ) {
+    const writable = stream;
+    this.batcher = new WriteBatcher(async (position, data) => {
+      await writable?.write({ type: "write", position, data });
+    });
+  }
 
   static async create(dir: FileSystemDirectoryHandle, name: string): Promise<DiskSink> {
     const filename = await freeName(dir, name);
@@ -289,22 +417,15 @@ class DiskSink implements FileSink {
   }
 
   write(offset: number, chunk: Uint8Array): Promise<void> {
-    const stream = this.stream;
-    if (!stream) return Promise.reject(new Error("stream closed"));
-    // The write is queued behind the ones before it and may run long after this call,
-    // so it cannot hold a view onto a frame the caller is free to reuse.
-    const copy = new Uint8Array(chunk);
-    this.tail = this.tail.then(() =>
-      stream.write({ type: "write", position: offset, data: copy }),
-    );
-    return this.tail;
+    if (!this.stream) return Promise.reject(new Error("stream closed"));
+    return this.batcher.write(offset, chunk);
   }
 
   async finish(): Promise<Blob | null> {
     const stream = this.stream;
     if (!stream) return null;
+    await this.batcher.drain();
     this.stream = null;
-    await this.tail;
     await stream.close();
     // Already where the person asked for it; there is nothing left to hand back.
     return null;
@@ -313,6 +434,7 @@ class DiskSink implements FileSink {
   async abort(): Promise<void> {
     const stream = this.stream;
     this.stream = null;
+    this.batcher.discard();
     try {
       await stream?.abort();
     } catch {
@@ -330,14 +452,18 @@ class DiskSink implements FileSink {
 
 class OpfsSink implements FileSink {
   readonly savedAs = null;
+  private readonly batcher: WriteBatcher;
 
-  constructor(private readonly id: string) {}
+  constructor(private readonly id: string) {
+    this.batcher = new WriteBatcher((offset, data) => pool.write(id, offset, data));
+  }
 
-  async write(offset: number, chunk: Uint8Array): Promise<void> {
-    await pool.write(this.id, offset, chunk);
+  write(offset: number, chunk: Uint8Array): Promise<void> {
+    return this.batcher.write(offset, chunk);
   }
 
   async finish(mime: string): Promise<Blob> {
+    await this.batcher.drain();
     await pool.finish(this.id);
 
     const root = await navigator.storage.getDirectory();
@@ -350,6 +476,7 @@ class OpfsSink implements FileSink {
   }
 
   async abort(): Promise<void> {
+    this.batcher.discard();
     await pool.discard(this.id).catch(() => undefined);
   }
 }

@@ -721,6 +721,11 @@ export class TransferEngine {
   }
 
   private failIncoming(transfer: IncomingTransfer, fileId: string, code: CancelCode): void {
+    // Writes still queued when a file is cancelled can fail after the fact; the file
+    // already ended, and that ending is the one to keep.
+    if (transfer.status === "cancelled" || transfer.status === "error" || transfer.status === "done") {
+      return;
+    }
     transfer.status = "error";
     transfer.problem = { code };
     transfer.updatedAt = Date.now();

@@ -10,7 +10,12 @@
  */
 
 const DIRECTORY = "incoming";
-const FLUSH_EVERY_WRITES = 32;
+/**
+ * Flushing commits written bytes to the disk itself, which is slow on phone storage in
+ * particular. Once per this much keeps a crash from costing more than a moment of the
+ * transfer without paying that price several times a second.
+ */
+const FLUSH_EVERY_BYTES = 16 * 1024 * 1024;
 /**
  * Files left behind by abandoned transfers are swept after this long. It is generous
  * because a completed file sits here until the user saves it, and losing one they
@@ -61,7 +66,7 @@ type Request =
 
 interface OpenFile {
   handle: FileSystemSyncAccessHandle;
-  writesSinceFlush: number;
+  bytesSinceFlush: number;
 }
 
 const ctx = globalThis as unknown as {
@@ -100,7 +105,7 @@ async function handle(request: Request): Promise<unknown> {
       const fileHandle = await dir.getFileHandle(request.id, { create: true });
       const accessHandle = await fileHandle.createSyncAccessHandle();
       await accessHandle.truncate(0);
-      open.set(request.id, { handle: accessHandle, writesSinceFlush: 0 });
+      open.set(request.id, { handle: accessHandle, bytesSinceFlush: 0 });
       return undefined;
     }
 
@@ -110,7 +115,7 @@ async function handle(request: Request): Promise<unknown> {
       // Throws if the file is gone, which is the caller's signal to give up on it.
       const fileHandle = await dir.getFileHandle(request.id);
       const accessHandle = await fileHandle.createSyncAccessHandle();
-      open.set(request.id, { handle: accessHandle, writesSinceFlush: 0 });
+      open.set(request.id, { handle: accessHandle, bytesSinceFlush: 0 });
       // The file itself is the record of how much arrived; nothing else is trusted.
       return await accessHandle.getSize();
     }
@@ -119,9 +124,9 @@ async function handle(request: Request): Promise<unknown> {
       const file = open.get(request.id);
       if (!file) throw new Error("no open file for this transfer");
       await file.handle.write(new Uint8Array(request.data), { at: request.offset });
-      file.writesSinceFlush += 1;
-      if (file.writesSinceFlush >= FLUSH_EVERY_WRITES) {
-        file.writesSinceFlush = 0;
+      file.bytesSinceFlush += request.data.byteLength;
+      if (file.bytesSinceFlush >= FLUSH_EVERY_BYTES) {
+        file.bytesSinceFlush = 0;
         await file.handle.flush();
       }
       return undefined;
