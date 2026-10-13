@@ -140,7 +140,8 @@ origin, so there is nothing else to host. Durable Objects run on Cloudflare's fr
 | `src/core/opfs-worker.ts` | Owns the filesystem handles off the main thread |
 | `src/ui/` | React screens |
 | `public/` | Manifest, icons, service worker, privacy page |
-| `scripts/make-icons.mjs` | Regenerates the icon PNGs (`npm run icons`) |
+| `scripts/make-icons.py` | Regenerates the icon PNGs from the pig's face (`npm run icons`, needs Pillow) |
+| `scripts/subset-fonts.py` | Cuts the brand fonts down to the characters GSend shows (`npm run fonts -- <font folder>`) |
 
 ## Current status
 

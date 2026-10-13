@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "deploy": "vite build && wrangler deploy",
     "cf-typegen": "wrangler types",
-    "icons": "node scripts/make-icons.mjs"
+    "icons": "python scripts/make-icons.py",
+    "fonts": "python scripts/subset-fonts.py"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
