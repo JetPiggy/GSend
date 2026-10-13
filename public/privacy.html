@@ -3,28 +3,47 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="light" />
     <title>Privacy — GSend</title>
     <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <!-- Same look as the app, work mode included; the fonts are served from this site. -->
+    <script>
+      (function () {
+        var on = false;
+        try { on = localStorage.getItem("gsend.work") === "1"; } catch (e) {}
+        if (on) document.documentElement.classList.add("work");
+      })();
+    </script>
     <style>
-      @import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Lora:wght@400;600&family=Noto+Serif+TC:wght@400;600&display=swap");
+      @font-face { font-family: "huninn"; src: url(/fonts/huninn.woff2) format("woff2"); font-display: swap; }
+      @font-face { font-family: "Nunito"; src: url(/fonts/Nunito.woff2) format("woff2"); font-weight: 300 900; font-display: swap; }
       :root {
-        --bg: #edf1f8;
-        --surface: #ffffff;
-        --border: #b9c2d6;
-        --text: #0b1220;
-        --muted: color-mix(in srgb, #0b1220 88%, transparent);
-        --accent: #06349c;
+        --paper: #F7F3E8;
+        --sheet: #FFFDF6;
+        --ink: #161616;
+        --muted: #5B564E;
+        --faint: rgba(22, 22, 22, 0.18);
+        --blue: #1F5FA8;
+        --blue-soft: #CFE3F7;
+        --red: #C4201B;
+        --pink-soft: #F9D9D8;
+        --ui: "Nunito", "huninn", system-ui, -apple-system, "PingFang HK", "Microsoft JhengHei", sans-serif;
+        --line: 3px solid var(--ink);
+        --wobble: 120px 14px 110px 14px / 14px 110px 14px 120px;
       }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --bg: #0b1220;
-          --surface: #131c30;
-          --border: color-mix(in srgb, #eef2fa 22%, transparent);
-          --text: #eef2fa;
-          --muted: color-mix(in srgb, #eef2fa 86%, transparent);
-          --accent: #9db8ff;
-        }
+      html.work {
+        --paper: #FFFFFF;
+        --sheet: #FFFFFF;
+        --ink: #1B1B1B;
+        --muted: #5F5F5F;
+        --faint: #E3E3E3;
+        --blue: #1B1B1B;
+        --blue-soft: transparent;
+        --red: #1B1B1B;
+        --pink-soft: #EDEDED;
+        --ui: system-ui, -apple-system, "Segoe UI", "PingFang HK", "Microsoft JhengHei", "Noto Sans HK", sans-serif;
+        --line: 1px solid #CFCFCF;
+        --wobble: 8px;
       }
       * {
         box-sizing: border-box;
@@ -32,52 +51,64 @@
       body {
         margin: 0;
         padding: 0 16px 64px;
-        background: var(--bg);
-        color: var(--text);
-        font-family: "Lora", "Noto Serif TC", Georgia, serif;
-        line-height: 1.65;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--ui);
+        line-height: 1.7;
+        -webkit-font-smoothing: antialiased;
       }
       main {
-        max-width: 680px;
+        max-width: 700px;
         margin: 0 auto;
       }
       header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 18px 0;
-        font-weight: 650;
-        font-size: 17px;
+        padding: 18px 0 14px;
+        border-bottom: var(--line);
       }
       header a {
         color: inherit;
         text-decoration: none;
         display: inline-flex;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
+        font-family: "Nunito", var(--ui);
+        font-weight: 900;
+        font-size: 26px;
+        line-height: 1;
+        color: var(--blue);
+        text-shadow: 3px 3px 0 var(--blue-soft);
       }
       header img {
-        width: 20px;
-        height: 20px;
-        border-radius: 6px;
+        width: 40px;
+        height: 40px;
+      }
+      html.work header img {
+        display: none;
+      }
+      html.work header a {
+        font-family: var(--ui);
+        font-weight: 700;
+        font-size: 22px;
+        text-shadow: none;
       }
       h1, h2 {
-        font-family: "Cormorant Garamond", "Noto Serif TC", Georgia, serif;
         font-weight: 400;
+        line-height: 1.3;
+      }
+      html.work h1, html.work h2 {
+        font-weight: 600;
       }
       h1 {
-        font-size: 30px;
-        letter-spacing: -0.02em;
-        margin: 12px 0 4px;
+        font-size: 36px;
+        margin: 36px 0 4px;
       }
       h2 {
-        font-size: 18px;
-        letter-spacing: -0.01em;
-        margin: 32px 0 8px;
+        font-size: 22px;
+        margin: 36px 0 8px;
       }
       p,
       li {
-        font-size: 15.5px;
+        font-size: 16px;
       }
       .updated {
         color: var(--muted);
@@ -85,44 +116,55 @@
         margin-top: 0;
       }
       .card {
-        background: color-mix(in srgb, var(--text) 2%, transparent);
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 4px 20px 20px;
+        background: var(--sheet);
+        border: var(--line);
+        border-radius: var(--wobble);
+        padding: 4px 24px 18px;
+        margin-top: 22px;
+      }
+      .card h2 {
         margin-top: 20px;
       }
       ul {
         padding-left: 20px;
       }
       li {
-        margin: 6px 0;
+        margin: 8px 0;
       }
       a {
-        color: var(--accent);
+        color: inherit;
+        text-decoration-thickness: 2px;
+        text-underline-offset: 3px;
+      }
+      a:hover {
+        color: var(--red);
       }
       hr {
         border: 0;
-        border-top: 1px solid var(--border);
-        margin: 40px 0;
+        border-top: 3px dashed var(--faint);
+        margin: 48px 0 0;
+      }
+      html.work hr {
+        border-top: 1px solid var(--faint);
       }
       code {
-        background: var(--surface);
-        border: 1px solid var(--border);
+        background: var(--sheet);
+        border: 1px solid var(--faint);
         border-radius: 5px;
         padding: 1px 5px;
         font-size: 0.9em;
       }
       footer {
-        margin-top: 40px;
+        margin-top: 44px;
         color: var(--muted);
-        font-size: 14px;
+        font-size: 15px;
       }
     </style>
   </head>
   <body>
     <main>
       <header>
-        <a href="/"><img src="/icon-192.png" alt="" />GSend</a>
+        <a href="/"><img src="/img/face-nav.png" alt="" width="40" height="40" />GSend</a>
       </header>
 
       <h1>Privacy</h1>
