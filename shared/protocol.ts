@@ -25,6 +25,14 @@ export const JOIN_ATTEMPT_WINDOW_MS = 60_000;
 /** Signalling payloads are SDP and ICE candidates only; anything larger is abuse. */
 export const MAX_SIGNAL_BYTES = 64 * 1024;
 
+/**
+ * Liveness probe on every signalling socket. The Durable Objects answer it with an
+ * automatic response, which costs no wake-up there, and both are bare strings rather
+ * than JSON so an older peer of either kind simply ignores them.
+ */
+export const HEARTBEAT_PING = "ping";
+export const HEARTBEAT_PONG = "pong";
+
 // --- paired devices ---------------------------------------------------------
 
 /**
@@ -69,7 +77,9 @@ export type GroupServerMessage =
 
 export type GroupClientMessage =
   | { t: "to"; peer: string; data: unknown }
-  | { t: "ice" };
+  | { t: "ice" }
+  /** The same anonymous count a code session reports, sent by one side of a device session. */
+  | { t: "stat"; outcome: ConnectionOutcome; path: ConnectionPath };
 
 export type Role = "host" | "guest";
 
@@ -112,6 +122,14 @@ export type ConnectionOutcome = "connected" | "failed";
  * project ever needs to pay for a TURN relay (PLAN.md §3.2).
  */
 export type ConnectionPath = "lan" | "internet" | "relay" | "unknown";
+
+export function isConnectionOutcome(value: unknown): value is ConnectionOutcome {
+  return value === "connected" || value === "failed";
+}
+
+export function isConnectionPath(value: unknown): value is ConnectionPath {
+  return value === "lan" || value === "internet" || value === "relay" || value === "unknown";
+}
 
 /** What a browser needs to hand to RTCPeerConnection. */
 export interface IceServer {

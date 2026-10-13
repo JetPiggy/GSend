@@ -2,6 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 import {
   CODE_TTL_MS,
   ERROR_TEXT,
+  HEARTBEAT_PING,
+  HEARTBEAT_PONG,
   MAX_SIGNAL_BYTES,
   RESUME_GRACE_MS,
   SESSION_IDLE_MS,
@@ -43,6 +45,13 @@ const ACTIVITY_WRITE_INTERVAL_MS = 30_000;
  * after 60 seconds or after the first guest pairs.
  */
 export class SessionRoom extends DurableObject<Env> {
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // Answered by the runtime without waking this object, so a client can tell a socket
+    // that silently died from one that is merely quiet.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HEARTBEAT_PING, HEARTBEAT_PONG));
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     switch (url.pathname) {
