@@ -64,7 +64,11 @@ export type PeerControl =
   | { t: "offer"; batchId: string; files: FileMeta[] }
   | { t: "accept"; batchId: string; offsets: Record<string, number> }
   | { t: "decline"; batchId: string; reason: string }
-  /** Receiver's durable watermark; doubles as the resume point. */
+  /**
+   * How much of the file the receiver has put on storage; the sender keeps at most a
+   * window beyond it. Older receivers count bytes on arrival instead, which only ever
+   * puts the sender further inside that window.
+   */
   | { t: "ack"; fileId: string; received: number }
   | { t: "done"; fileId: string }
   | { t: "cancel"; fileId: string; reason: CancelCode; limit?: number }

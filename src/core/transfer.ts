@@ -29,6 +29,14 @@ const LOW_WATER_BYTES = 1 * 1024 * 1024;
 
 const ACK_INTERVAL_BYTES = 512 * 1024;
 const ACK_INTERVAL_MS = 250;
+/**
+ * The most the sender lets run ahead of what the receiver has put on storage. Well
+ * above what a normal link keeps in flight (the channel buffer above, the receiver's
+ * write batch, a round trip of acks), so it only binds when the receiving disk is the
+ * slower end — and then the difference waits on the sender's disk, not in the
+ * receiver's memory.
+ */
+const ACK_WINDOW_BYTES = 32 * 1024 * 1024;
 /** Backstop so a stalled channel can never hang the send loop indefinitely. */
 const DRAIN_TIMEOUT_MS = 5_000;
 
@@ -65,6 +73,7 @@ interface OutgoingTransfer {
   file: File;
   batchId: string;
   sent: number;
+  /** What the receiver reports as stored; the pump keeps within a window of it. */
   acked: number;
   status: TransferStatus;
   problem?: TransferProblem;
@@ -72,13 +81,16 @@ interface OutgoingTransfer {
   updatedAt: number;
   /** Set when the channels dropped: the sender must not resume until the receiver reports its offset. */
   awaitingResume: boolean;
-  resumeGate?: () => void;
+  /** Releases the pump from whatever it is waiting on; it re-checks why before going on. */
+  wake?: () => void;
 }
 
 interface IncomingTransfer {
   meta: FileMeta;
   sink: FileSink;
   received: number;
+  /** How much of `received` storage has confirmed; the gap is held in memory meanwhile. */
+  written: number;
   status: TransferStatus;
   problem?: TransferProblem;
   downloadUrl?: string;
@@ -90,6 +102,8 @@ interface IncomingTransfer {
   updatedAt: number;
   lastAckAt: number;
   lastAckBytes: number;
+  /** A held-back ack, sent once the throttle allows. */
+  ackTimer?: ReturnType<typeof setTimeout>;
 }
 
 export interface TransferCallbacks {
@@ -140,6 +154,7 @@ export class TransferEngine {
           meta,
           sink: createCompletedSink(stored.savedAs),
           received: stored.size,
+          written: stored.size,
           status: "done",
           downloaded: false,
           savedAs: stored.savedAs,
@@ -160,6 +175,7 @@ export class TransferEngine {
           meta,
           sink: createCompletedSink(),
           received: stored.size,
+          written: stored.size,
           status: "done",
           downloadUrl: URL.createObjectURL(blob),
           blob,
@@ -175,10 +191,13 @@ export class TransferEngine {
       const reopened = await reopenSink(stored.id);
       if (!reopened) continue;
 
+      // Measured from the file itself, so all of it is already on storage.
+      const received = Math.min(reopened.received, stored.size);
       this.incoming.set(stored.id, {
         meta,
         sink: reopened.sink,
-        received: Math.min(reopened.received, stored.size),
+        received,
+        written: received,
         status: "paused",
         downloaded: false,
         startedAt: now,
@@ -263,6 +282,8 @@ export class TransferEngine {
       if (transfer.status === "active") {
         transfer.status = "paused";
         transfer.awaitingResume = true;
+        // No ack will come over a dead channel; the pump goes to wait for the resume.
+        transfer.wake?.();
       }
     }
     for (const transfer of this.incoming.values()) {
@@ -389,7 +410,7 @@ export class TransferEngine {
     if (outgoing && outgoing.status !== "done") {
       outgoing.status = "cancelled";
       outgoing.updatedAt = Date.now();
-      outgoing.resumeGate?.();
+      outgoing.wake?.();
       this.callbacks.sendControl({ t: "cancel", fileId, reason: "sender-cancelled" });
     }
 
@@ -469,17 +490,23 @@ export class TransferEngine {
     transfer.received += slice.byteLength;
     transfer.updatedAt = Date.now();
 
-    void transfer.sink
-      .write(writeAt, slice)
-      .catch(() => this.failIncoming(transfer, fileId, "write-failed"));
+    const end = transfer.received;
+    void transfer.sink.write(writeAt, slice).then(
+      () => this.onWritten(fileId, transfer, end),
+      () => this.failIncoming(transfer, fileId, "write-failed"),
+    );
 
-    if (transfer.received >= transfer.meta.size) {
-      void this.completeIncoming(fileId, transfer);
-    } else {
-      this.maybeAck(fileId, transfer);
-    }
+    if (transfer.received >= transfer.meta.size) void this.completeIncoming(fileId, transfer);
 
     this.callbacks.onChange();
+  }
+
+  /** Writes land in order, so each one settling moves a single watermark on. */
+  private onWritten(fileId: string, transfer: IncomingTransfer, end: number): void {
+    transfer.written = Math.max(transfer.written, end);
+    // Every frame of a batch settles in the same moment. Deciding after all of them
+    // have, rather than on the first, reports the whole batch in one ack.
+    queueMicrotask(() => this.maybeAck(fileId, transfer));
   }
 
   private async onOffer(batchId: string, files: FileMeta[]): Promise<void> {
@@ -506,6 +533,7 @@ export class TransferEngine {
         meta,
         sink: await createSink(meta.id, meta.name),
         received: 0,
+        written: 0,
         status: "active",
         downloaded: false,
         startedAt: now,
@@ -571,6 +599,8 @@ export class TransferEngine {
         // object and the one captured above is dead.
         if (this.channels !== channels || transfer.awaitingResume) break;
 
+        await this.waitForWindow(transfer, channels);
+        if (this.stopped(transfer)) return;
         await this.waitForDrain(channels);
         if (this.channels !== channels || transfer.awaitingResume) break;
 
@@ -603,9 +633,33 @@ export class TransferEngine {
 
   private async waitForResume(transfer: OutgoingTransfer): Promise<void> {
     await new Promise<void>((resolve) => {
-      transfer.resumeGate = resolve;
+      transfer.wake = resolve;
     });
-    transfer.resumeGate = undefined;
+    transfer.wake = undefined;
+  }
+
+  /**
+   * Acks count what the receiver has stored, so a gap this wide means its disk is
+   * falling behind the link, and sending on would only pile the difference up in its
+   * memory. An ack wakes this, as do a cancel, a dropped channel and a resume. The
+   * timeout is the same backstop as in `waitForDrain`: should acks stop altogether, the
+   * file trickles on rather than hanging. Older receivers ack on arrival instead, which
+   * keeps them well inside the window, so they never wait here.
+   */
+  private async waitForWindow(transfer: OutgoingTransfer, channels: PeerChannels): Promise<void> {
+    while (transfer.sent - transfer.acked > ACK_WINDOW_BYTES) {
+      if (this.stopped(transfer) || this.channels !== channels || transfer.awaitingResume) return;
+
+      const woken = await new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), DRAIN_TIMEOUT_MS);
+        transfer.wake = () => {
+          clearTimeout(timer);
+          resolve(true);
+        };
+      });
+      transfer.wake = undefined;
+      if (!woken) return;
+    }
   }
 
   /**
@@ -649,15 +703,16 @@ export class TransferEngine {
 
       transfer.awaitingResume = false;
       transfer.updatedAt = Date.now();
-      transfer.resumeGate?.();
+      transfer.wake?.();
     }
     this.callbacks.onChange();
   }
 
   private onAck(fileId: string, received: number): void {
     const transfer = this.outgoing.get(fileId);
-    if (!transfer) return;
-    transfer.acked = Math.max(transfer.acked, received);
+    if (!transfer || received <= transfer.acked) return;
+    transfer.acked = received;
+    transfer.wake?.();
   }
 
   private onRemoteDone(fileId: string): void {
@@ -676,7 +731,7 @@ export class TransferEngine {
     if (outgoing && outgoing.status !== "done") {
       outgoing.status = "cancelled";
       outgoing.problem = problem;
-      outgoing.resumeGate?.();
+      outgoing.wake?.();
     }
     const incoming = this.incoming.get(fileId);
     if (incoming && incoming.status !== "done") {
@@ -689,15 +744,33 @@ export class TransferEngine {
     this.callbacks.onTransfersChanged();
   }
 
+  /**
+   * Acks report what has reached storage, not what has arrived: the sender holds back
+   * once too much is unacknowledged, and that is what keeps a disk slower than the link
+   * from queueing the difference here in memory. Throttled, but never dropped. A write
+   * that lands inside the interval is reported when it ends, because the sender may be
+   * waiting on exactly that ack, with nothing in flight that would prompt another.
+   */
   private maybeAck(fileId: string, transfer: IncomingTransfer): void {
-    const now = Date.now();
-    const grown = transfer.received - transfer.lastAckBytes >= ACK_INTERVAL_BYTES;
-    const stale = now - transfer.lastAckAt >= ACK_INTERVAL_MS;
-    if (!grown && !stale) return;
+    if (transfer.status !== "active" || transfer.written <= transfer.lastAckBytes) return;
 
+    const now = Date.now();
+    const grown = transfer.written - transfer.lastAckBytes >= ACK_INTERVAL_BYTES;
+    const wait = transfer.lastAckAt + ACK_INTERVAL_MS - now;
+    if (!grown && wait > 0) {
+      transfer.ackTimer ??= setTimeout(() => {
+        transfer.ackTimer = undefined;
+        this.maybeAck(fileId, transfer);
+      }, wait);
+      return;
+    }
+
+    clearTimeout(transfer.ackTimer);
+    transfer.ackTimer = undefined;
+    // The field keeps its old name, so a sender from before this reads it all the same.
+    if (!this.callbacks.sendControl({ t: "ack", fileId, received: transfer.written })) return;
     transfer.lastAckAt = now;
-    transfer.lastAckBytes = transfer.received;
-    this.callbacks.sendControl({ t: "ack", fileId, received: transfer.received });
+    transfer.lastAckBytes = transfer.written;
   }
 
   private async completeIncoming(fileId: string, transfer: IncomingTransfer): Promise<void> {
