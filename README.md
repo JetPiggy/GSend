@@ -177,6 +177,11 @@ rather than hard-coded — several GB on a typical desktop — falling to 256 MB
 OPFS is unusable, such as Safari private browsing. Either way the receiving side is the
 one that refuses a file it has no room for, since only it can see its own storage.
 
+A disk slower than the network does not end up in memory either. The receiver
+acknowledges bytes only once they are on storage, and the sender pauses while it is more
+than 32 MB ahead of those acknowledgements, so a USB stick or a busy phone sets the pace
+of the transfer instead of filling the tab until it crashes.
+
 **Devices remember each other after one pairing.** A browser generates a keypair on
 first use and keeps it, with the devices it has paired with, in IndexedDB. Pairing rides
 on the ordinary code flow: once the channel is open the two sides exchange public keys,
