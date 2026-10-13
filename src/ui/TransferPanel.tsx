@@ -297,7 +297,7 @@ function formatPair(done: number, total: number): string {
   return `${fmt(a)}/${fmt(b)} ${unit}`.trim();
 }
 
-function TransferRow({
+export function TransferRow({
   transfer,
   client,
   i18n,

@@ -7,7 +7,7 @@ import { useI18n, type Translator } from "./i18n";
 import Landing from "./ui/Landing";
 import HostPanel from "./ui/HostPanel";
 import PairingPanel from "./ui/PairingPanel";
-import TransferPanel from "./ui/TransferPanel";
+import TransferPanel, { TransferRow } from "./ui/TransferPanel";
 
 const client = new GSendClient();
 
@@ -166,6 +166,11 @@ function EndedScreen({ state, i18n }: { state: Snapshot; i18n: Translator }) {
   const sentBytes = sent.reduce((sum, row) => sum + row.size, 0);
   const receivedBytes = received.reduce((sum, row) => sum + row.size, 0);
   const hasSummary = sent.length > 0 || received.length > 0;
+  // Files held in browser storage exist only as these links. The sender ending the
+  // session as soon as its files are through is the usual way a session ends, and this
+  // screen used to replace the list with a summary, leaving them no way to be saved.
+  const held = received.filter((row) => row.downloadUrl && !row.savedAs);
+  const unsaved = held.filter((row) => !row.downloaded).length;
 
   return (
     <section className="ended">
@@ -175,6 +180,26 @@ function EndedScreen({ state, i18n }: { state: Snapshot; i18n: Translator }) {
       {hasSummary && (
         <div className="term term--muted">
           {`sent      ${sent.length} · ${formatBytes(sentBytes)}\nreceived  ${received.length} · ${formatBytes(receivedBytes)}`}
+        </div>
+      )}
+      {held.length > 0 && (
+        <div className="ended__held">
+          {unsaved > 0 && <p className="ended__lede">{t("ended.unsaved")}</p>}
+          {state.notice && (
+            <p className="alert alert--soft" onClick={() => client.dismissNotice()}>
+              {tm(state.notice)}
+            </p>
+          )}
+          <ul className="transfers">
+            {held.map((transfer) => (
+              <TransferRow key={transfer.id} transfer={transfer} client={client} i18n={i18n} cells={10} />
+            ))}
+          </ul>
+          {unsaved > 1 && (
+            <button type="button" className="btn btn--secondary" onClick={() => void client.saveAll()}>
+              {t("transfer.saveAll")} <span className="session-head__count">{unsaved}</span>
+            </button>
+          )}
         </div>
       )}
       <button type="button" className="btn btn--primary btn--lg" onClick={() => client.reset()}>

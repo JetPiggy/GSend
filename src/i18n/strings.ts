@@ -19,6 +19,8 @@ export const en = {
   "ended.title": "Session ended",
   "ended.default": "The session is closed.",
   "ended.startOver": "Start over",
+  "ended.unsaved":
+    "These files are still only in this browser. Save the ones you want before starting over, which lets go of them.",
 
   "landing.kicker": "Browser to browser · nothing stored",
   "landing.title": "Move files between your devices",
@@ -188,6 +190,7 @@ export const zh: Record<MessageKey, string> = {
   "ended.title": "連線已結束",
   "ended.default": "這個連線已經關閉。",
   "ended.startOver": "重新開始",
+  "ended.unsaved": "這些檔案目前只存在這個瀏覽器裡。要留的請先儲存,按「重新開始」後就不會再保留。",
 
   "landing.kicker": "瀏覽器直連 · 檔案不經伺服器",
   "landing.title": "在你的裝置之間傳檔案",

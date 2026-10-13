@@ -597,6 +597,21 @@ body {
 .ended .display--md { font-size: 28px; margin-bottom: 10px; }
 .ended__lede { margin: 0 0 24px; font-size: 15px; color: var(--ink-70); }
 .ended .term { margin-bottom: 24px; }
+.ended__held { margin-bottom: 24px; }
+.ended__held .ended__lede { margin-bottom: 14px; }
+.ended__held .alert { margin-bottom: 14px; }
+.ended__held .transfers { margin-bottom: 14px; }
+/* Every file here is finished, so the bar and the live stats have nothing to say and the
+   name gets their room: the card is far narrower than the session panel. */
+.ended__held .transfer {
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+  grid-template-areas: "arrow name stats action";
+}
+.ended__held .transfer__stats { display: flex; grid-area: stats; }
+.ended__held .transfer__bar,
+.ended__held .transfer__pct,
+.ended__held .transfer__stat--rate,
+.ended__held .transfer__stat--eta { display: none; }
 
 /* ── responsive ────────────────────────────────────────────────────────── */
 
