@@ -87,6 +87,8 @@ export const en = {
   "transfer.saveAll": "Save all",
   "transfer.cancel": "Cancel",
   "transfer.limitDisk": "disk",
+  "transfer.relayNote":
+    "No direct route was found between these two devices, so this connection runs through a relay server and is slower. Putting both on the same Wi-Fi usually allows a direct one — unless the network keeps its devices apart, as guest Wi-Fi often does.",
 
   "status.connected": "Connected",
   "status.peerAway": "The other device dropped off — waiting for it to come back",
@@ -248,6 +250,7 @@ export const zh: Record<MessageKey, string> = {
   "transfer.saveAll": "全部儲存",
   "transfer.cancel": "取消",
   "transfer.limitDisk": "磁碟",
+  "transfer.relayNote": "這兩台裝置之間找不到直接的路徑,所以這次改經由中繼伺服器傳輸,速度會比較慢。讓兩台裝置連同一個 Wi-Fi 通常就能直連——除非那個網路刻意把裝置彼此隔開,訪客 Wi-Fi 常常這樣。",
 
   "status.connected": "已連線",
   "status.peerAway": "另一台裝置離線了——正在等它回來",

@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
+import type { ConnectionPath } from "../shared/protocol";
 import { GSendClient, type Snapshot } from "./core/client";
 import { collectShare } from "./core/share";
 import { formatBytes, prepareStorage } from "./core/sink";
@@ -122,11 +123,25 @@ export default function App() {
   );
 }
 
+/**
+ * The route the bytes actually take, as measured. Whether relay servers were offered
+ * says nothing about it: a connection given them usually still goes direct.
+ */
+const ROUTE_WORD: Record<ConnectionPath, string | null> = {
+  lan: "lan",
+  internet: "direct",
+  relay: "relay",
+  unknown: null,
+};
+
 /** "已連線 · direct" in the header, per the design's CLI-flavoured status line. */
 function StatusChip({ state, i18n }: { state: Snapshot; i18n: Translator }) {
   const online = state.connection === "connected" && state.channelsOpen;
+  const route = state.path ? ROUTE_WORD[state.path] : null;
   const label = online
-    ? `${i18n.t("status.connected")} · ${state.relayEngaged ? "turn" : "direct"}`
+    ? route
+      ? `${i18n.t("status.connected")} · ${route}`
+      : i18n.t("status.connected")
     : state.peerAbsentSince !== null && !state.channelsOpen
       ? i18n.t("status.peerAway")
       : state.connection === "reconnecting"

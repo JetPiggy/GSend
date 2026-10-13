@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ConnectionPath } from "../../shared/protocol";
 import type { GSendClient, Snapshot } from "../core/client";
 import { directPickerSupported, formatBytes, maxFileBytes } from "../core/sink";
 import type { TransferView } from "../core/transfer";
@@ -184,6 +185,8 @@ export default function TransferPanel({ client, state }: Props) {
         )}
 
         <div className="term term--muted">{statusBlock(state, t("transfer.limitDisk"))}</div>
+        {/* A slow transfer through the relay looks like the app being slow; say why. */}
+        {state.path === "relay" && <p className="aside-note">{t("transfer.relayNote")}</p>}
 
         <hr className="hr" style={{ margin: "2px 0" }} />
         <p className="aside-note">
@@ -196,12 +199,20 @@ export default function TransferPanel({ client, state }: Props) {
   );
 }
 
+/** The measured route, not whether relay servers were on offer. */
+const ROUTE_LINE: Record<ConnectionPath, string> = {
+  lan: "direct · lan",
+  internet: "direct",
+  relay: "relay · turn",
+  unknown: "connected",
+};
+
 /**
  * The mono blocks are deliberately untranslated — they are the design's CLI voice —
  * except for the one word that has to say whether the ceiling is a number or the disk.
  */
 function statusBlock(state: Snapshot, diskWord: string): string {
-  const route = state.relayEngaged ? "relay · turn" : "direct";
+  const route = state.path ? ROUTE_LINE[state.path] : "----";
   const where = state.savingTo ?? "browser";
   const ceiling = state.savingTo ? diskWord : `${formatBytes(maxFileBytes())} / file`;
   // A device session was never named by a code, so the last line reports which paired
