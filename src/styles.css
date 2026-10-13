@@ -597,6 +597,7 @@ body {
 .ended .display--md { font-size: 28px; margin-bottom: 10px; }
 .ended__lede { margin: 0 0 24px; font-size: 15px; color: var(--ink-70); }
 .ended .term { margin-bottom: 24px; }
+.ended__actions { display: flex; gap: 12px; flex-wrap: wrap; }
 .ended__held { margin-bottom: 24px; }
 .ended__held .ended__lede { margin-bottom: 14px; }
 .ended__held .alert { margin-bottom: 14px; }

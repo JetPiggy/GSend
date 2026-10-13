@@ -171,6 +171,13 @@ function EndedScreen({ state, i18n }: { state: Snapshot; i18n: Translator }) {
   // screen used to replace the list with a summary, leaving them no way to be saved.
   const held = received.filter((row) => row.downloadUrl && !row.savedAs);
   const unsaved = held.filter((row) => !row.downloaded).length;
+  // Trying again keeps what was picked, so nobody has to choose it again. A device can
+  // only be called while it is online; the button waits for it rather than doing nothing.
+  const retry = state.retry;
+  const retryDevice = retry?.device ? state.devices.find((device) => device.id === retry.device) : null;
+  const showRetry = retry !== null && (retry.device === null || retryDevice != null);
+  const retryWaiting = retryDevice != null && !retryDevice.online;
+  const queued = state.pendingShare;
 
   return (
     <section className="ended">
@@ -180,6 +187,16 @@ function EndedScreen({ state, i18n }: { state: Snapshot; i18n: Translator }) {
       {hasSummary && (
         <div className="term term--muted">
           {`sent      ${sent.length} · ${formatBytes(sentBytes)}\nreceived  ${received.length} · ${formatBytes(receivedBytes)}`}
+        </div>
+      )}
+      {showRetry && queued && (
+        <div className="term term--muted">
+          {`queued    ${[
+            queued.files > 0 ? `${queued.files} · ${formatBytes(queued.bytes)}` : null,
+            queued.text ? "text" : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}`}
         </div>
       )}
       {held.length > 0 && (
@@ -202,9 +219,28 @@ function EndedScreen({ state, i18n }: { state: Snapshot; i18n: Translator }) {
           )}
         </div>
       )}
-      <button type="button" className="btn btn--primary btn--lg" onClick={() => client.reset()}>
-        {t("ended.startOver")}
-      </button>
+      {retryWaiting && (
+        <p className="ended__lede">{t("ended.retryOffline", { name: retryDevice.name })}</p>
+      )}
+      <div className="ended__actions">
+        {showRetry && (
+          <button
+            type="button"
+            className="btn btn--primary btn--lg"
+            disabled={retryWaiting}
+            onClick={() => client.retry()}
+          >
+            {t("ended.retry")}
+          </button>
+        )}
+        <button
+          type="button"
+          className={showRetry ? "btn btn--secondary btn--lg" : "btn btn--primary btn--lg"}
+          onClick={() => client.reset()}
+        >
+          {t("ended.startOver")}
+        </button>
+      </div>
     </section>
   );
 }

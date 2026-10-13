@@ -8,7 +8,7 @@ import {
   type ServerErrorCode,
   type ServerMessage,
 } from "../../shared/protocol";
-import type { Message } from "../i18n/strings";
+import type { Message, MessageKey } from "../i18n/strings";
 import { PeerLink, STUN_ONLY, type PeerChannels, type PeerState } from "./peer";
 import { saveFiles } from "./save";
 import { clearSession, loadSession, saveSession } from "./session-store";
@@ -87,6 +87,11 @@ export interface Snapshot {
   texts: TextMessage[];
   /** Staged before the code was created, waiting for a peer to connect. */
   pendingShare: { files: number; bytes: number; text: boolean } | null;
+  /**
+   * A session that ended before anything moved can be tried again with the same files:
+   * a call to the same paired device, or (device null) a fresh code. Null otherwise.
+   */
+  retry: { device: string | null } | null;
   notice: Message | null;
   error: Message | null;
 }
@@ -131,6 +136,21 @@ const PATH_SETTLE_MS = 5_000;
  * opened in time. Direct connections have measured 1–3 s; this leaves headroom.
  */
 const RELAY_AFTER_MS = 6_000;
+
+/** Endings where a paired device was never reached, so calling it again can still work. */
+const DEVICE_RETRY_REASONS: ReadonlySet<MessageKey> = new Set([
+  "error.deviceUnreachable",
+  "error.peerGone",
+  "error.deviceBusy",
+]);
+
+/** What a failed session was trying to deliver, kept so it can be tried again. */
+interface RetryTarget {
+  /** The paired device that was called; null for a code that expired unused. */
+  device: string | null;
+  files: File[];
+  text: string | null;
+}
 
 interface Credentials {
   code: string;
@@ -231,6 +251,7 @@ export class GSendClient {
   private texts: TextMessage[] = [];
   private pendingFiles: File[] = [];
   private pendingText: string | null = null;
+  private retryTarget: RetryTarget | null = null;
   private notice: Message | null = null;
   private error: Message | null = null;
   /** A "save all" is still handing files over; a second press would repeat them. */
@@ -1388,6 +1409,7 @@ ${trimmed}` : trimmed;
     // must not come back to life behind the ended screen.
     this.sessionEpoch += 1;
     this.startingPeer = false;
+    this.retryTarget = this.retryFor(reason);
     this.hangUp();
     this.phase = "ended";
     this.error = reason;
@@ -1400,6 +1422,43 @@ ${trimmed}` : trimmed;
     this.clearTimers();
     clearSession();
     this.emitNow();
+  }
+
+  /**
+   * Whether this ending leaves something worth repeating as it was. Only a session that
+   * never moved a byte or a line qualifies: anything already handed over would be sent
+   * twice, and starting a new session lets go of whatever this one received.
+   */
+  private retryFor(reason: Message | null): RetryTarget | null {
+    if (!reason) return null;
+    const moved =
+      this.transfer.snapshotOutgoing().length > 0 ||
+      this.transfer.snapshotIncoming().length > 0 ||
+      this.texts.length > 0;
+    if (moved) return null;
+
+    const files = this.pendingFiles;
+    const text = this.pendingText;
+    if (this.mode === "group") {
+      if (!this.peerDevice || !DEVICE_RETRY_REASONS.has(reason.key)) return null;
+      return { device: this.peerDevice, files, text };
+    }
+    // An expired code with nothing staged is just "get a code" again, which the start
+    // screen already offers.
+    if (reason.key !== "error.nobodyJoined" || (files.length === 0 && text === null)) return null;
+    return { device: null, files, text };
+  }
+
+  /**
+   * Repeat the session that just failed, without anyone picking the files again: call
+   * the same device, or reserve a fresh code. A device that is not online cannot be
+   * called, so nothing happens until it is; the closing screen says as much.
+   */
+  retry(): void {
+    const target = this.retryTarget;
+    if (!target || this.phase !== "ended") return;
+    if (target.device) this.connectToDevice(target.device, target.files, target.text);
+    else this.host(target.files, target.text);
   }
 
   reset(): void {
@@ -1444,6 +1503,7 @@ ${trimmed}` : trimmed;
     this.texts = [];
     this.pendingFiles = [];
     this.pendingText = null;
+    this.retryTarget = null;
     this.notice = null;
     this.error = null;
     this.closedByUser = false;
@@ -1551,6 +1611,7 @@ ${trimmed}` : trimmed;
               text: this.pendingText !== null,
             }
           : null,
+      retry: this.retryTarget ? { device: this.retryTarget.device } : null,
       notice: this.notice,
       error: this.error,
     };
