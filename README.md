@@ -160,8 +160,11 @@ every chunk is written straight into the destination file. The choice is remembe
 restored for as long as the browser keeps the grant. Joining itself never opens the
 picker: a system dialog appearing where someone pressed Enter to connect read as the app
 misbehaving, and files that arrive before a folder is chosen are simply saved from
-browser storage instead. Nothing is buffered on the way, so the limit is free disk space
-and a finished file is already saved. The trade is that those writes are
+browser storage instead. Nothing beyond a couple of megabytes is held on the way, so the
+limit is free disk space and a finished file is already saved. That couple of megabytes
+is deliberate: frames carry under 64 KB each, and writing every one on its own cost a
+round trip into the browser's file machinery per frame, so both storage paths gather a
+file's frames into writes of about 2 MB. The trade is that those writes are
 committed by the browser only when the stream closes: a dropped connection is survivable
 because the stream outlives it, but a page reload is not, so a half-received file on that
 path is not offered for resume.
@@ -191,10 +194,31 @@ for itself.
 
 Because that room outlives any single session, every message in it names the session it
 belongs to. A session opens only on an explicit call, and only on a device that is not
-already busy — a busy one says so and the caller is told. Ending a session tells the
-other device too, so it stops instead of retrying into the room, and a retry that slips
-through anyway (the other tab was closed rather than ended) carries a dead session's
-name and is ignored rather than mistaken for a new call.
+already busy — a busy one says so and the caller is told. The answer is explicit too:
+the called device acknowledges straight away, and the caller rings again every two
+seconds until it does, resending its opening offer each time, because a call sent while
+the other device's socket was reconnecting used to vanish and leave "Connecting" on
+screen for good. A device that never answers is reported as unreachable after about
+twelve seconds. A second call from the same device replaces a session that never got
+going rather than being refused as busy, since that device only calls again once it has
+given up on the first. Ending a session tells the other device too, so it stops instead
+of retrying into the room, and a retry that slips through anyway (the other tab was
+closed rather than ended) carries a dead session's name and is ignored rather than
+mistaken for a new call.
+
+Only one tab per device can be the one the others reach. Two tabs used to take the room
+from each other every second, splitting each call between them; now the tab that was
+replaced steps aside and says so, and takes the room back when it is brought to the
+front or its "Use this tab" button is pressed.
+
+**A dead connection to the server is noticed.** A socket whose network went away — a
+phone switching from Wi-Fi to mobile data, a laptop waking from sleep, a tab frozen in
+the background — can sit open for minutes with no close event, swallowing every message
+sent into it. Both kinds of room answer a ping without waking up (a Durable Object
+automatic response), so the client probes every 20 seconds and again whenever the page
+returns to the front, and replaces a socket that stops answering. The rendezvous room
+uses the same pings from the other side: a member silent for two minutes is dropped from
+everyone's device list, instead of being listed as online while unable to answer.
 
 iOS is the weak spot. Safari evicts IndexedDB for a site that has not been used in seven
 days unless it is installed to the home screen, so a pairing there can lapse and need
@@ -203,14 +227,16 @@ markedly safer.
 
 **Anonymous connection counts** are recorded so the TURN question can be settled with
 evidence: one record per session saying whether a direct connection worked and whether
-it was made over a local network or punched through NAT. No addresses, no timestamps
+it was made over a local network or punched through NAT. Sessions between paired devices
+report too, from the side that makes the offer; they used to go uncounted. No addresses, no timestamps
 beyond the day, no session identifiers, nothing tied to a person. The totals are public
 at `/api/stats`.
 
 **A received file stays available until it is saved.** On the browser-storage path it
 sits in the origin-private filesystem, and its row survives a reload, a dropped
 connection, and the session going quiet — the download link is rebuilt from the file on
-disk. Backgrounding a phone mid-transfer no longer costs you the file. On the
+disk. It also survives the other side ending the session, which is how most sessions end:
+the closing screen lists every file still waiting, with its save button and "Save all". Backgrounding a phone mid-transfer no longer costs you the file. On the
 direct-to-disk path there is nothing to keep available: the file is already where it was
 asked to go, and the row says so instead of offering a save button.
 
@@ -270,6 +296,16 @@ direct never spends relay traffic, and one that cannot connects a few seconds la
 over TURN, including TURN over TLS on port 443 for networks that block UDP entirely.
 Credentials are minted per session by the Worker and never reach the browser as a key.
 With no relay configured the app falls back to STUN alone and behaves exactly as before.
+
+The few seconds are counted from when the other device is actually there to connect to:
+the moment a guest joins, or a called device answers. A host waiting for its code to be
+entered used to build a connection into the void whenever its window regained focus, run
+out the clock on it, and greet the guest with a session already committed to the relay.
+When the relay does go in, the offering side tells the other first, so both ends gather
+relay candidates for the restart rather than one. The header shows the route the bytes
+actually take — `lan`, `direct` or `relay`, read from the transport rather than inferred
+from whether relay servers were offered — and a relayed session says why it is slower
+and what usually fixes it.
 
 **A privacy page** at [/privacy](https://gsend.cc/privacy) sets out exactly what the
 server handles, what it never receives, what stays on your device, and who else is
