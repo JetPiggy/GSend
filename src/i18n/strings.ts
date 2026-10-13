@@ -132,6 +132,9 @@ export const en = {
   "devices.savingNowhere":
     "Files sent to this device wait in the browser until you save them. Pick a folder and they land in it on their own.",
   "devices.changeFolder": "Change",
+  "devices.displaced":
+    "GSend is open in another tab or window on this device, and that one is what your other devices reach.",
+  "devices.useThisTab": "Use this tab",
 
   "error.badCode": "Enter the 4 digits shown on the other device.",
   "error.unknownDevice": "That device could not prove which device it is, so nothing was sent.",
@@ -139,6 +142,8 @@ export const en = {
   "error.nobodyJoined": "Nobody joined in time. Start a new session.",
   "error.peerEnded": "The other device ended the session.",
   "error.deviceBusy": "That device is in another session right now. Try again once it has finished.",
+  "error.deviceUnreachable":
+    "The other device did not answer. Check that GSend is open and in front on it, then try again.",
   "error.sessionIdle": "The session was closed after sitting idle.",
   "error.expiredWhileAway": "The session expired while this page was away. Start a new one.",
   "error.serverLost": "Lost the connection to the server.",
@@ -282,6 +287,8 @@ export const zh: Record<MessageKey, string> = {
   "devices.savingTo": "傳到這台裝置的檔案會直接寫進「{folder}」。",
   "devices.savingNowhere": "傳到這台裝置的檔案會先留在瀏覽器裡等你儲存。選一個資料夾,之後就會自動落到那裡。",
   "devices.changeFolder": "更改",
+  "devices.displaced": "這台裝置的另一個分頁或視窗也開著 GSend,其他裝置現在連到的是那一個。",
+  "devices.useThisTab": "改用這個分頁",
 
   "error.badCode": "請輸入另一台裝置上顯示的 4 位數字。",
   "error.unknownDevice": "對方無法證明自己是哪一台裝置,所以沒有傳送任何東西。",
@@ -289,6 +296,7 @@ export const zh: Record<MessageKey, string> = {
   "error.nobodyJoined": "沒有人在時限內加入。請重新建立連線。",
   "error.peerEnded": "另一台裝置結束了這個連線。",
   "error.deviceBusy": "那台裝置正在進行另一個連線,等它結束後再試一次。",
+  "error.deviceUnreachable": "對方裝置沒有回應。請確認那台裝置上的 GSend 開著、而且在前景,再試一次。",
   "error.sessionIdle": "連線閒置過久,已經關閉。",
   "error.expiredWhileAway": "這個頁面離開期間連線已經失效。請重新建立一個。",
   "error.serverLost": "與伺服器的連線中斷了。",

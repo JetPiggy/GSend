@@ -44,6 +44,11 @@ export interface HandshakeHandlers {
   onRejected(reason: RejectReason): void;
 }
 
+/** Whether a control message belongs to the handshake rather than to the transfer engine. */
+export function isHandshakeMessage(msg: PeerControl): boolean {
+  return msg.t === "auth" || msg.t === "auth-proof" || msg.t === "group-invite" || msg.t === "auth-fail";
+}
+
 /** The id is a hash of the public key, so a claim can be checked against itself. */
 async function idMatchesKey(id: string, publicKey: string): Promise<boolean> {
   try {

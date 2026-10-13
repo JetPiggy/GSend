@@ -44,6 +44,24 @@ export default function DeviceList({ client, state, files, text }: Props) {
     <div>
       <h4 className="side-title">{t("devices.title")}</h4>
 
+      {/*
+        Only one tab per device can be the one the others reach. A tab brought to the
+        front takes that over by itself; this is for the one visible but not focused.
+      */}
+      {state.groupDisplaced && (
+        <p className="alert alert--soft" style={{ marginBottom: 14 }}>
+          {t("devices.displaced")}
+          <button
+            type="button"
+            className="btn btn--secondary btn--tiny"
+            style={{ marginLeft: 10 }}
+            onClick={() => client.useThisTab()}
+          >
+            {t("devices.useThisTab")}
+          </button>
+        </p>
+      )}
+
       <ul className="devices">
         <li className="device device--self">
           <span className={state.groupOnline ? "device__dot" : "device__dot device__dot--off"} aria-hidden="true" />

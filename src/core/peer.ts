@@ -221,6 +221,23 @@ export class PeerLink {
     this.attemptIceRestart();
   }
 
+  /**
+   * Send the offer still waiting for an answer once more, for a peer that may not have
+   * been listening when it first went out. By now the description carries every
+   * candidate gathered so far, so the ones trickled earlier are not lost with it.
+   */
+  resendOffer(): void {
+    const pc = this.pc;
+    if (this.disposed || !pc || pc.signalingState !== "have-local-offer") return;
+    const offer = pc.localDescription;
+    if (offer) this.handlers.onSignal({ description: offer.toJSON() });
+  }
+
+  /** Whether the transport itself is up, as opposed to whatever the interface last said. */
+  get transportConnected(): boolean {
+    return this.pc?.connectionState === "connected";
+  }
+
   private attemptIceRestart(): void {
     if (this.role !== "host" || !this.pc) return;
     if (this.pc.connectionState === "closed") return;

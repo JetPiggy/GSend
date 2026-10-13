@@ -20,7 +20,7 @@ import {
 } from "./sink";
 import { forgetDevice, forgetGroup, groupSecret, knownDevices, type KnownDevice } from "./devices";
 import { GroupLink } from "./group";
-import { Handshake } from "./handshake";
+import { Handshake, isHandshakeMessage } from "./handshake";
 import { loadIdentity, renameDevice, type Identity } from "./identity";
 import type { PeerControl } from "./protocol";
 import { Signaling } from "./signaling";
@@ -57,6 +57,13 @@ export interface Snapshot {
   connection: PeerState;
   /** True once this session brought the relay into play (billable path). */
   relayEngaged: boolean;
+  /**
+   * The route the connection actually took, read from the transport once it is up.
+   * Bringing the relay into play does not mean the bytes go through it, and the other
+   * side's relay can carry them when this side never engaged one, so only this says why
+   * a transfer is slow.
+   */
+  path: ConnectionPath | null;
   channelsOpen: boolean;
   mode: Mode;
   /** This device's own name and id, once the browser has given us a durable store. */
@@ -65,6 +72,8 @@ export interface Snapshot {
   devices: DeviceView[];
   /** Whether this device is currently findable by the others. */
   groupOnline: boolean;
+  /** Another tab or window of this browser is the one the other devices can reach. */
+  groupDisplaced: boolean;
   /** The paired device this session is talking to, when it came from the device list. */
   peerDevice: string | null;
   /** Whether the peer has proved which device it is. Required before anything moves in group mode. */
@@ -82,8 +91,24 @@ export interface Snapshot {
   error: Message | null;
 }
 
-const PROGRESS_THROTTLE_MS = 40;
+/**
+ * Byte-level progress is coalesced to this. The receiving side handles every frame on
+ * the main thread, so a re-render 25 times a second competed with the transfer itself
+ * on a phone, and a ten-cell progress bar has nothing to show at that rate anyway.
+ */
+const PROGRESS_THROTTLE_MS = 150;
 const MAX_RECONNECT_DELAY_MS = 15_000;
+/** How often an unanswered call to a paired device is repeated, and how many times. */
+const CALL_RETRY_MS = 2_000;
+const CALL_ATTEMPTS = 6;
+/**
+ * How long a paired device may be missing from the rendezvous room before a session
+ * that never got connected is given up. Long enough to forgive a socket reconnecting
+ * or a window rolling over; short enough that nobody is left watching "Connecting".
+ */
+const GROUP_ABSENCE_MS = 20_000;
+/** Control messages held back for an unproved peer; anything past this is not a real peer. */
+const MAX_HELD_CONTROL = 512;
 /** ICE restarts often recover, so a failure only counts once it stops recovering. */
 const FAILURE_CONFIRM_MS = 15_000;
 /** Never hold a connection back waiting for relay credentials that may not arrive. */
@@ -119,6 +144,16 @@ interface InstanceAnnouncement {
 }
 
 /**
+ * Sent by the side that offers, just before it restarts ICE with the relay. The other
+ * side gathers its candidates for that restart from whatever servers it holds by then,
+ * and without the hint it could still be on the direct-only list, so only one end would
+ * ever reach the relay.
+ */
+interface RelayHint {
+  relay: true;
+}
+
+/**
  * Every message between paired devices names the session it belongs to. The rendezvous
  * room outlives any one session, so without this a device still retrying a connection
  * the other side had already ended looked exactly like a device calling afresh.
@@ -131,6 +166,8 @@ interface GroupEnvelope {
   bye?: true;
   /** The call was refused because this device is already in a session. */
   busy?: true;
+  /** The call arrived and is being answered, so the caller can stop repeating it. */
+  ack?: true;
   /** A WebRTC signal for the session. */
   data?: unknown;
 }
@@ -164,7 +201,22 @@ export class GSendClient {
   private peerDevice: string | null = null;
   /** Names the device session in progress, so its messages can be told from stale ones. */
   private groupSession: string | null = null;
+  /** This side placed the call, rather than answering one. Settles two calls crossing. */
+  private groupCaller = false;
+  /** The other device has been heard from in this session, so the call got through. */
+  private groupAnswered = false;
+  private callAttempts = 0;
+  private callTimer: ReturnType<typeof setTimeout> | null = null;
+  private groupAbsenceTimer: ReturnType<typeof setTimeout> | null = null;
   private handshake: Handshake | null = null;
+  /**
+   * Control messages that arrived before they could be handled: a claim before this
+   * side had started its own half of the handshake, or anything for the transfer engine
+   * before the peer had finished proving itself. The peer can finish verifying this side
+   * first and start sending straight away, and dropping its opening offer meant a
+   * session that connected, verified, and then never moved a byte.
+   */
+  private heldControl: string[] = [];
   private verified = false;
   private woken = false;
   /** Kept so a group session can attach the engine once the peer has proved itself. */
@@ -196,12 +248,17 @@ export class GSendClient {
   private iceServersPromise: Promise<IceServer[]> | null = null;
   private resolveIceServers: ((servers: IceServer[]) => void) | null = null;
   private startingPeer = false;
+  /** Bumped by every reset, so work begun for one session cannot land in the next. */
+  private sessionEpoch = 0;
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
   private escalateTimer: ReturnType<typeof setTimeout> | null = null;
   /** Everything the server offered, relay included, kept for escalation. */
   private iceServersFull: IceServer[] | null = null;
   /** Once true, every connection this session builds starts with the relay in play. */
   private relayNeeded = false;
+  /** The direct attempt ran out of time, so the relay goes in as soon as there is one to add. */
+  private relayDue = false;
+  private path: ConnectionPath | null = null;
 
   private listeners = new Set<() => void>();
   /** Built at the end of the constructor, once the engines it reads from exist. */
@@ -230,6 +287,7 @@ export class GSendClient {
     this.group = new GroupLink({
       onPresence: (peers) => {
         this.presence = new Set(peers);
+        this.watchGroupPeer();
         this.emitNow();
       },
       onSignal: (peer, data) => this.onGroupSignal(peer, data),
@@ -279,8 +337,14 @@ export class GSendClient {
     this.emitNow();
     // A pairing may have just created or changed the group, which is what the
     // rendezvous room is derived from, so the socket has to be pointed at the new one.
-    this.group.stop();
+    // Pointing it at the room it is already in is a no-op: the device session being
+    // verified here signals through that very socket.
     await this.goOnline();
+  }
+
+  /** Take the room back from another tab or window of this browser. */
+  useThisTab(): void {
+    this.group.wake(true);
   }
 
   async rename(name: string): Promise<void> {
@@ -321,6 +385,7 @@ export class GSendClient {
     this.mode = "group";
     this.peerDevice = id;
     this.groupSession = crypto.randomUUID();
+    this.groupCaller = true;
     // No host and guest here, so the tie is broken by id. Both sides read it the same
     // way, which is all perfect negotiation needs to settle offer collisions.
     this.role = this.identity.id < id ? "host" : "guest";
@@ -329,8 +394,54 @@ export class GSendClient {
     this.emitNow();
     // Said outright rather than left to the first offer: when this side is the guest it
     // makes no offer, and the other device would never learn it was being called.
-    this.group.send(id, { session: this.groupSession, call: true } satisfies GroupEnvelope);
+    this.placeCall();
     void this.startPeer();
+  }
+
+  /**
+   * Ring the other device, and keep ringing until it answers. Its socket can be a moment
+   * away from reconnecting — waking from the background, moving to the next room — and a
+   * call sent into that gap used to vanish, leaving this side on "Connecting" for good.
+   * A device that never answers is reported as such rather than waited on forever.
+   */
+  private placeCall(): void {
+    const session = this.groupSession;
+    const peer = this.peerDevice;
+    if (!session || !peer || this.groupAnswered) return;
+    if (this.callAttempts >= CALL_ATTEMPTS) {
+      this.end({ key: "error.deviceUnreachable" });
+      return;
+    }
+
+    this.callAttempts += 1;
+    this.group.send(peer, { session, call: true } satisfies GroupEnvelope);
+    if (this.callAttempts > 1) {
+      // A call that went unheard took the opening offer with it. Sent after the call,
+      // which is what tells the other side the offer is for a session it knows.
+      this.peer?.resendOffer();
+      // The relay credentials are asked for through the same socket, and may have been
+      // lost the same way; without them a connection that needs the relay cannot happen.
+      if (!offersRelay(this.iceServersFull)) this.group.requestIce();
+    }
+    this.callTimer = setTimeout(() => {
+      this.callTimer = null;
+      this.placeCall();
+    }, CALL_RETRY_MS);
+  }
+
+  /** The other device has been heard from in this session: the call is through. */
+  private onCallAnswered(): void {
+    if (this.mode !== "group" || this.groupAnswered) return;
+    this.groupAnswered = true;
+    this.clearCallTimer();
+    // Its half of the connection starts now, so this is when the direct attempt's
+    // allowance starts too; counted from the first ring, a slow answer used it up.
+    this.armRelayDeadline();
+  }
+
+  private clearCallTimer(): void {
+    if (this.callTimer) clearTimeout(this.callTimer);
+    this.callTimer = null;
   }
 
   /**
@@ -351,14 +462,23 @@ export class GSendClient {
         this.end({ key: msg.busy ? "error.deviceBusy" : "error.peerEnded" });
         return;
       }
+      // Anything at all for this session, an answer or the first signal, means it rang.
+      this.onCallAnswered();
+      // The caller is still ringing, so the answer it was sent went missing; repeat it.
+      if (msg.call && !this.groupCaller) {
+        this.group.send(peer, { session: msg.session, ack: true } satisfies GroupEnvelope);
+      }
       if (msg.data !== undefined) this.onSignal(msg.data);
       return;
     }
 
     if (!msg.call) return;
     if (!this.identity || !this.paired.some((known) => known.id === peer)) return;
-    if (this.phase !== "idle" && this.phase !== "ended") {
-      this.group.send(peer, { session: msg.session, busy: true } satisfies GroupEnvelope);
+    if (this.phase !== "idle" && this.phase !== "ended" && !this.callReplaces(peer, msg.session)) {
+      // Two devices calling each other at once each see the other's call here. The one
+      // that keeps its own call says nothing: the other side is already moving over.
+      const crossed = this.mode === "group" && this.groupCaller && peer === this.peerDevice;
+      if (!crossed) this.group.send(peer, { session: msg.session, busy: true } satisfies GroupEnvelope);
       return;
     }
 
@@ -366,11 +486,29 @@ export class GSendClient {
     this.mode = "group";
     this.peerDevice = peer;
     this.groupSession = msg.session;
+    this.groupAnswered = true;
     this.role = this.identity.id < peer ? "host" : "guest";
     this.phase = "pairing";
     this.peerPresent = true;
     this.emitNow();
+    // Answered before anything else, so the caller stops ringing at once.
+    this.group.send(peer, { session: msg.session, ack: true } satisfies GroupEnvelope);
     void this.startPeer();
+  }
+
+  /**
+   * Whether a call should take over the session this device is already in. Only ever a
+   * call from the same device: it calls again only once it has given up on the session
+   * it started before, so refusing it as busy left this side waiting on a session the
+   * other had abandoned, and that side unable to reach it until someone ended it by hand.
+   * A session that is up and carrying data is never replaced. When both devices call
+   * each other at the same moment, both keep the smaller session id and so agree.
+   */
+  private callReplaces(peer: string, session: string): boolean {
+    if (this.mode !== "group" || peer !== this.peerDevice || !this.groupSession) return false;
+    if (this.channelsOpen && this.peer?.transportConnected) return false;
+    if (!this.groupCaller) return true;
+    return session < this.groupSession;
   }
 
   /**
@@ -380,8 +518,32 @@ export class GSendClient {
   private hangUp(): void {
     const session = this.groupSession;
     this.groupSession = null;
+    this.clearCallTimer();
     if (!session || !this.peerDevice) return;
     this.group.send(this.peerDevice, { session, bye: true } satisfies GroupEnvelope);
+  }
+
+  /**
+   * A device session has no server room to say the other side left, so the rendezvous
+   * presence stands in for it: a peer missing from the room while the connection is
+   * still not up is not going to finish it. Short absences are forgiven, and so is our
+   * own socket being down, which empties the list without saying anything about them.
+   */
+  private watchGroupPeer(): void {
+    const peer = this.peerDevice;
+    const waiting = this.mode === "group" && this.phase === "pairing" && !this.channelsOpen && peer !== null;
+    if (!waiting || this.presence.has(peer) || !this.group.online) {
+      if (this.groupAbsenceTimer) clearTimeout(this.groupAbsenceTimer);
+      this.groupAbsenceTimer = null;
+      return;
+    }
+    if (this.groupAbsenceTimer) return;
+    this.groupAbsenceTimer = setTimeout(() => {
+      this.groupAbsenceTimer = null;
+      if (this.mode !== "group" || this.phase !== "pairing" || this.channelsOpen) return;
+      if (!this.peerDevice || this.presence.has(this.peerDevice)) return;
+      this.end({ key: "error.peerGone" });
+    }, GROUP_ABSENCE_MS);
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -572,15 +734,31 @@ ${trimmed}` : trimmed;
     if (this.statReported) return;
     if (this.channelsOpen) {
       // Connected, but ended before the settle timer fired; the path is still worth
-      // recording even if it had not fully quiesced.
-      void this.reportStat("connected");
+      // recording even if it had not fully quiesced. The route measured when the
+      // channels opened goes as it stands: measuring again would finish after end()
+      // has closed the socket, and the count would be lost.
+      this.statReported = true;
+      this.sendStat("connected", this.path ?? "unknown");
       return;
     }
     if (this.phase !== "pairing" && this.phase !== "joining") return;
     this.statReported = true;
     // Sent directly rather than through reportStat, whose await would land after the
     // socket has already been closed by end().
-    this.signaling.send({ t: "stat", outcome: "failed", path: "unknown" });
+    this.sendStat("failed", "unknown");
+  }
+
+  /**
+   * A code session's room keeps one count per session whoever reports it. A device
+   * session has no such room, and both devices see the same connection, so only the
+   * side that offered reports it.
+   */
+  private sendStat(outcome: ConnectionOutcome, path: ConnectionPath): void {
+    if (this.mode === "group") {
+      if (this.role === "host") this.group.sendStat(outcome, path);
+      return;
+    }
+    this.signaling.send({ t: "stat", outcome, path });
   }
 
   // --- signalling ----------------------------------------------------------
@@ -596,6 +774,9 @@ ${trimmed}` : trimmed;
         this.peerPresent = true;
         this.clearPeerAbsence();
         if (this.phase === "hosting") this.phase = "pairing";
+        // The departure that preceded this marked the connection as reconnecting, and
+        // with the bytes still flowing nothing else was going to take that back.
+        if (this.channelsOpen && this.peer?.transportConnected) this.connection = "connected";
         this.announceInstance();
         this.emitNow();
         break;
@@ -738,22 +919,32 @@ ${trimmed}` : trimmed;
       this.resolveIceServers = resolve;
       if (this.mode === "group") this.group.requestIce();
       else this.signaling.send({ t: "ice" });
-      setTimeout(() => this.deliverIceServers(STUN_ONLY), ICE_REQUEST_TIMEOUT_MS);
+      setTimeout(() => {
+        // Only this request's own fallback: a timer left over from an earlier session
+        // must not answer the one that replaced it.
+        if (this.resolveIceServers !== resolve) return;
+        this.resolveIceServers = null;
+        this.iceServersFull ??= STUN_ONLY;
+        resolve(STUN_ONLY);
+      }, ICE_REQUEST_TIMEOUT_MS);
     });
     return this.iceServersPromise;
   }
 
   private deliverIceServers(servers: IceServer[]): void {
-    // Only the first delivery counts. The request has a fallback timeout that offers
-    // STUN alone, and without this guard a slow-but-successful reply was overwritten
-    // by that fallback — leaving escalation convinced there was no relay to add.
-    const resolve = this.resolveIceServers;
-    if (!resolve) return;
-    this.resolveIceServers = null;
-
+    // A real reply is always kept for escalation, even one that lands after the
+    // fallback has already let the connection start on STUN: it is the only place the
+    // relay can come from. The fallback, for its part, never overwrites a real reply —
+    // that once left escalation convinced there was no relay to add.
     const resolved = servers.length > 0 ? servers : STUN_ONLY;
     this.iceServersFull = resolved;
-    resolve(resolved);
+
+    const resolve = this.resolveIceServers;
+    this.resolveIceServers = null;
+    resolve?.(resolved);
+
+    // The direct attempt already ran out of time while there was nothing to add.
+    if (this.relayDue && !this.channelsOpen) this.engageRelay();
   }
 
   private announceInstance(): void {
@@ -761,9 +952,15 @@ ${trimmed}` : trimmed;
   }
 
   private onSignal(data: unknown): void {
-    const announcement = data as Partial<InstanceAnnouncement> | null;
-    if (announcement && typeof announcement.instance === "string") {
-      this.onRemoteInstance(announcement.instance);
+    const control = data as Partial<InstanceAnnouncement & RelayHint> | null;
+    if (control && typeof control.instance === "string") {
+      this.onRemoteInstance(control.instance);
+      return;
+    }
+    if (control?.relay === true) {
+      // Remembered, so relay servers that arrive only after this are put in on arrival.
+      this.relayDue = true;
+      this.engageRelay();
       return;
     }
     if (!this.peer) {
@@ -797,6 +994,11 @@ ${trimmed}` : trimmed;
    * replaced, and leaving it be is what strands a session on "Connecting" forever.
    */
   private revivePeer(): void {
+    // Nobody to connect to yet. A host waiting for its code to be entered used to build
+    // a connection into the void whenever its window regained focus, and the relay
+    // deadline then ran out on it — so the guest, arriving later, was met by a session
+    // that had already committed itself to the relay, and every transfer crawled.
+    if (!this.peerPresent) return;
     if (!this.peer) {
       void this.startPeer();
       return;
@@ -839,15 +1041,17 @@ ${trimmed}` : trimmed;
   private async startPeer(): Promise<void> {
     if (this.peer || this.startingPeer || !this.role) return;
     this.startingPeer = true;
+    const epoch = this.sessionEpoch;
 
     let iceServers: IceServer[];
     try {
       iceServers = await this.requestIceServers();
     } finally {
-      this.startingPeer = false;
+      if (epoch === this.sessionEpoch) this.startingPeer = false;
     }
 
-    if (this.peer || !this.role) return;
+    // The session this was started for may have ended while the servers were awaited.
+    if (epoch !== this.sessionEpoch || this.peer || !this.role) return;
 
     const forceRelay = isRelayForced();
     if (forceRelay) this.relayNeeded = true;
@@ -862,6 +1066,8 @@ ${trimmed}` : trimmed;
           this.engageRelay();
           this.scheduleFailureStat();
         }
+        // A restart can land on a different route from the one before it.
+        if (state === "connected") void this.measurePath();
         this.emitNow();
       },
       onChannels: (channels) => this.onChannels(channels),
@@ -869,6 +1075,7 @@ ${trimmed}` : trimmed;
         this.channelsOpen = false;
         this.openChannels = null;
         this.transfer.detach();
+        this.forgetUnfinishedHandshake();
         this.emitNow();
       },
       onControlMessage: (raw) => this.onPeerControl(raw),
@@ -884,14 +1091,18 @@ ${trimmed}` : trimmed;
     this.pendingSignals = [];
     for (const data of queued) void this.peer.handleSignal(data);
 
-    this.armRelayDeadline();
+    // A device that has not answered the call yet is not trying to connect, so its
+    // silence is no evidence against a direct route. The clock starts when it answers.
+    if (this.mode === "code" || this.groupAnswered) this.armRelayDeadline();
   }
 
   private armRelayDeadline(): void {
-    if (this.relayNeeded || this.escalateTimer) return;
+    if (this.relayNeeded || this.escalateTimer || !this.peer || this.channelsOpen) return;
     this.escalateTimer = setTimeout(() => {
       this.escalateTimer = null;
-      if (!this.channelsOpen) this.engageRelay();
+      if (this.channelsOpen) return;
+      this.relayDue = true;
+      this.engageRelay();
     }, RELAY_AFTER_MS);
   }
 
@@ -904,11 +1115,15 @@ ${trimmed}` : trimmed;
     if (this.relayNeeded) return;
 
     const full = this.iceServersFull;
-    if (!full || full.length === withoutRelay(full).length) return;
+    if (!full || !offersRelay(full)) return;
 
     this.relayNeeded = true;
     this.clearEscalateTimer();
     if (!this.peer || this.channelsOpen) return;
+
+    // The offering side restarts ICE, and the other side gathers for that restart from
+    // whatever servers it holds by then, so it is told to take the relay on first.
+    if (this.role === "host") this.sendSignal({ relay: true } satisfies RelayHint);
 
     // Rebuild only for a browser whose setConfiguration cannot do it in place; the
     // rebuilt peer starts with the full list because relayNeeded is already set.
@@ -924,7 +1139,9 @@ ${trimmed}` : trimmed;
     this.peer?.close();
     this.peer = null;
     this.channelsOpen = false;
+    this.path = null;
     this.connection = "connecting";
+    this.forgetUnfinishedHandshake();
     // Detached explicitly: the discarded link no longer reports its own closure, and
     // without this the sender would keep its old send offsets instead of waiting for
     // the peer to say where to pick up.
@@ -941,6 +1158,9 @@ ${trimmed}` : trimmed;
     this.clearPeerAbsence();
     this.peerPresent = true;
     this.openChannels = channels;
+    this.onCallAnswered();
+    this.watchGroupPeer();
+    void this.measurePath();
     // A group session holds the engine back until the peer has proved itself; a code
     // session has already been vouched for by the person who read out the digits.
     if (this.trusted()) this.transfer.attach(channels);
@@ -992,15 +1212,32 @@ ${trimmed}` : trimmed;
         if (this.openChannels) this.transfer.attach(this.openChannels);
         this.phase = "active";
         this.peerJoinedAt ??= Date.now();
+        // Whatever the peer sent while it was still unproved goes through first, in
+        // order, ahead of anything this side now sends.
+        this.releaseHeldControl();
         this.flushPendingShare();
         this.emitNow();
       },
       onRejected: () => {
+        this.heldControl = [];
         // Only reachable in group mode, where an unproved peer has no business here.
         if (this.mode === "group") this.end({ key: "error.unknownDevice" });
       },
     });
     void this.handshake.begin();
+    // The peer's claim may have arrived before this side's channels both reported open.
+    this.releaseHeldControl();
+  }
+
+  /**
+   * A handshake cut off by the channels closing would wait forever for messages that
+   * went down with them, and a device session would never be allowed to carry anything.
+   * One that had not finished is dropped, so the next channels start it afresh.
+   */
+  private forgetUnfinishedHandshake(): void {
+    if (this.verified) return;
+    this.handshake = null;
+    this.heldControl = [];
   }
 
   private onPeerControl(raw: string): void {
@@ -1010,9 +1247,36 @@ ${trimmed}` : trimmed;
     } catch {
       return;
     }
-    if (this.handshake?.handle(msg)) return;
-    if (!this.trusted()) return;
+
+    if (isHandshakeMessage(msg)) {
+      // The channels open on the two sides a moment apart, so the peer's claim can
+      // arrive before this side has begun its own half; dropped, the pairing never
+      // completed and a device session never verified.
+      if (this.handshake) this.handshake.handle(msg);
+      else this.holdControl(raw);
+      return;
+    }
+
+    // A device session lets nothing reach the transfer engine until the peer has proved
+    // itself. The peer can finish verifying this side first and send its offer at once,
+    // so that offer waits here rather than being thrown away.
+    if (!this.trusted()) {
+      this.holdControl(raw);
+      return;
+    }
     this.transfer.handleControl(raw);
+  }
+
+  private holdControl(raw: string): void {
+    if (this.heldControl.length < MAX_HELD_CONTROL) this.heldControl.push(raw);
+  }
+
+  /** Hand over whatever can now be handled; anything that still cannot is held again, in order. */
+  private releaseHeldControl(): void {
+    const held = this.heldControl;
+    if (held.length === 0) return;
+    this.heldControl = [];
+    for (const raw of held) this.onPeerControl(raw);
   }
 
   // --- connection metrics --------------------------------------------------
@@ -1035,8 +1299,24 @@ ${trimmed}` : trimmed;
     this.statReported = true;
 
     let path: ConnectionPath = "unknown";
-    if (outcome === "connected" && this.peer) path = await this.peer.describePath();
-    this.signaling.send({ t: "stat", outcome, path });
+    if (outcome === "connected") path = (await this.measurePath()) ?? "unknown";
+    this.sendStat(outcome, path);
+  }
+
+  /**
+   * Read which route the connection took. Done the moment the channels open, again once
+   * ICE has settled, and after every reconnection, since a restart can move it.
+   */
+  private async measurePath(): Promise<ConnectionPath | null> {
+    const peer = this.peer;
+    if (!peer || !this.channelsOpen) return this.path;
+    const path = await peer.describePath();
+    if (peer !== this.peer || path === "unknown") return this.path;
+    if (path !== this.path) {
+      this.path = path;
+      this.emitNow();
+    }
+    return path;
   }
 
   // --- page lifecycle ------------------------------------------------------
@@ -1044,18 +1324,23 @@ ${trimmed}` : trimmed;
   private installLifecycleHandlers(): void {
     if (typeof window === "undefined") return;
 
-    const wake = () => this.checkHealth();
-
     // A bfcache restore resumes a page that was frozen mid-session.
     window.addEventListener("pageshow", (event) => {
-      if (event.persisted) wake();
+      if (event.persisted) this.checkHealth(true);
     });
-    window.addEventListener("focus", wake);
-    window.addEventListener("online", wake);
+    window.addEventListener("focus", () => this.checkHealth(true));
+    // Reaches every tab at once, so it must not count as this tab being the one in front.
+    window.addEventListener("online", () => this.checkHealth(false));
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") wake();
+      if (document.visibilityState === "visible") this.checkHealth(true);
     });
-    window.addEventListener("pagehide", () => this.persist());
+    window.addEventListener("pagehide", (event) => {
+      this.persist();
+      // A device session cannot survive a reload — only a code session's credentials
+      // are kept for that — so the other device is told now instead of finding out by
+      // waiting. A page only being put into the back/forward cache may yet come back.
+      if (!event.persisted) this.hangUp();
+    });
   }
 
   /**
@@ -1063,26 +1348,46 @@ ${trimmed}` : trimmed;
    * the background, and a bfcache restore does not reliably deliver the close event,
    * so the page can come back believing it is still connected. Probe rather than trust.
    */
-  private checkHealth(): void {
-    if (!this.credentials) return;
+  private checkHealth(inFront: boolean): void {
+    // The socket that keeps this device reachable by its paired devices, in or out of a session.
+    this.group.wake(inFront);
+
     if (this.phase === "idle" || this.phase === "ended" || this.phase === "creating") return;
 
-    if (!this.signaling.isOpen) {
-      this.clearReconnectTimer();
-      this.reconnectAttempt = 0;
-      this.reconnectDeadline = Date.now() + RESUME_GRACE_MS;
-      this.connection = "reconnecting";
-      this.emitNow();
-      this.resumeSignaling();
-      return;
+    if (this.mode === "code") {
+      if (!this.credentials) return;
+      // A reconnect is already under way. Starting another closed that one mid-attempt,
+      // and its closure then scheduled yet another reconnect, round and round.
+      if (this.signaling.isConnecting) return;
+
+      if (!this.signaling.isOpen) {
+        this.clearReconnectTimer();
+        this.reconnectAttempt = 0;
+        this.reconnectDeadline = Date.now() + RESUME_GRACE_MS;
+        this.connection = "reconnecting";
+        this.emitNow();
+        this.resumeSignaling();
+        return;
+      }
+      this.signaling.wake();
     }
 
-    this.revivePeer();
+    // Only a connection that has actually broken is restarted. Focus comes back for all
+    // sorts of reasons — a file or folder picker closing, a click from another window —
+    // and restarting ICE on every one threw away attempts that were about to succeed.
+    if (this.channelsOpen || !this.peerPresent) return;
+    const broken =
+      this.connection === "failed" || this.connection === "closed" || this.connection === "reconnecting";
+    if (!this.peer || broken) this.revivePeer();
   }
 
   // --- lifecycle -----------------------------------------------------------
 
   private end(reason: Message | null): void {
+    // Work still in flight for this session, a peer waiting on its servers above all,
+    // must not come back to life behind the ended screen.
+    this.sessionEpoch += 1;
+    this.startingPeer = false;
     this.hangUp();
     this.phase = "ended";
     this.error = reason;
@@ -1098,12 +1403,17 @@ ${trimmed}` : trimmed;
   }
 
   reset(): void {
+    // Going back to the start mid-session is still leaving it. Without the goodbye the
+    // other device spent five minutes waiting for this one to come back, and a code
+    // cancelled before anyone joined stayed reserved until it expired.
+    if (this.phase !== "idle" && this.phase !== "ended") this.leave();
     this.resetSession();
     this.phase = "idle";
     this.emitNow();
   }
 
   private resetSession(): void {
+    this.sessionEpoch += 1;
     this.hangUp();
     this.clearTimers();
     this.peer?.close();
@@ -1125,7 +1435,11 @@ ${trimmed}` : trimmed;
     this.peerJoinedAt = null;
     this.mode = "code";
     this.peerDevice = null;
+    this.groupCaller = false;
+    this.groupAnswered = false;
+    this.callAttempts = 0;
     this.handshake = null;
+    this.heldControl = [];
     this.verified = false;
     this.texts = [];
     this.pendingFiles = [];
@@ -1140,6 +1454,8 @@ ${trimmed}` : trimmed;
     this.resolveIceServers = null;
     this.iceServersFull = null;
     this.relayNeeded = false;
+    this.relayDue = false;
+    this.path = null;
     this.startingPeer = false;
   }
 
@@ -1162,6 +1478,9 @@ ${trimmed}` : trimmed;
 
   private clearTimers(): void {
     this.clearReconnectTimer();
+    this.clearCallTimer();
+    if (this.groupAbsenceTimer) clearTimeout(this.groupAbsenceTimer);
+    this.groupAbsenceTimer = null;
     if (this.peerTimer) clearTimeout(this.peerTimer);
     if (this.progressTimer) clearTimeout(this.progressTimer);
     if (this.failureTimer) clearTimeout(this.failureTimer);
@@ -1206,6 +1525,7 @@ ${trimmed}` : trimmed;
       peerAbsentSince: this.peerAbsentSince,
       connection: this.connection,
       relayEngaged: this.relayNeeded,
+      path: this.channelsOpen ? this.path : null,
       channelsOpen: this.channelsOpen,
       mode: this.mode,
       identity: this.identity ? { id: this.identity.id, name: this.identity.name } : null,
@@ -1215,6 +1535,7 @@ ${trimmed}` : trimmed;
         online: this.presence.has(device.id),
       })),
       groupOnline: this.group.online,
+      groupDisplaced: this.group.displaced,
       peerDevice: this.peerDevice,
       verified: this.verified,
       savingTo: saveDirectoryName(),
@@ -1242,6 +1563,10 @@ function withoutRelay(servers: IceServer[]): IceServer[] {
     const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
     return !urls.some((url) => url.startsWith("turn:") || url.startsWith("turns:"));
   });
+}
+
+function offersRelay(servers: IceServer[] | null): boolean {
+  return servers !== null && withoutRelay(servers).length < servers.length;
 }
 
 /** Debug switch: ?relay=force proves the relay path works on a given network. */
