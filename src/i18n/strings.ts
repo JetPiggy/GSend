@@ -22,7 +22,7 @@ export const en = {
   "hand.note": "Lasts 60 seconds,\nworks once.",
   "hand.stamp1": "No cables",
   "hand.stamp2": "No chat apps",
-  "hand.stamp3": "No trace",
+  "hand.stamp3": "No uploads",
 
   "ended.title": "Session ended",
   "ended.default": "The session is closed.",
@@ -235,7 +235,7 @@ export const zh: Record<MessageKey, string> = {
   "hand.note": "碼 60 秒內有效，\n用一次就作廢。",
   "hand.stamp1": "不用線",
   "hand.stamp2": "不用通訊軟件",
-  "hand.stamp3": "無痕",
+  "hand.stamp3": "不上傳",
 
   "ended.title": "連線已結束",
   "ended.default": "這次連線已經關閉。",

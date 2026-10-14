@@ -1,7 +1,7 @@
 {
   "name": "GSend — device to device transfer",
   "short_name": "GSend",
-  "description": "Send files and text straight from one device to another. Nothing is stored on a server.",
+  "description": "Send files and text straight from one device to another. Nothing you send is stored on a server.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
