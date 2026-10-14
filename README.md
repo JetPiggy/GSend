@@ -351,4 +351,5 @@ See `PLAN.md` for the full roadmap and the decisions behind it.
 
 ## Licence
 
-MIT.
+[MIT](LICENSE), except the GSend and JetPiggy names, the app icons and the pig artwork,
+which are not covered; the fonts keep their own licences. See [NOTICE](NOTICE).
