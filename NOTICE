@@ -1,0 +1,37 @@
+GSend
+Copyright 2026 JetPiggy
+
+除以下各項外，本專案以 MIT License 授權（見 LICENSE）。
+Except as noted below, this project is licensed under the MIT License
+(see LICENSE).
+
+1. 品牌圖像 / Brand assets
+
+   GSend 和 JetPiggy 的名稱、App 圖示和 JetPiggy 飛豬的圖像保留所有權利，
+   不在 MIT License 的範圍內，包括：
+   The GSend and JetPiggy names, the app icons and the JetPiggy flying pig
+   artwork are all rights reserved and not covered by the MIT License.
+   This includes:
+
+   - public/img/
+   - public/apple-touch-icon.png
+   - public/favicon-32.png
+   - public/favicon-work-32.png
+   - public/icon-192.png
+   - public/icon-512.png
+   - public/icon-maskable-512.png
+
+   發佈修改版時，請改用自己的名稱和圖示。
+   If you distribute a modified version, use your own name and icon.
+
+2. 字型 / Fonts
+
+   public/fonts/ 的字型是原字型的子集，各自保留原本的授權，
+   授權檔在同一個資料夾。
+   The fonts in public/fonts/ are subsets of the original fonts and keep
+   their own licences. The licence files are in the same folder.
+
+3. 其他第三方程式庫 / Other third-party libraries
+
+   各自保留原本的授權，見 package.json。
+   They keep their own licences. See package.json.
