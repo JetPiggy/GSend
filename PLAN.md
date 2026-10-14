@@ -108,7 +108,7 @@ Chrome / Edge / Android Chrome + Safari / iOS Safari 全列必須;Safari 走 200
 
 ### 已完成(M1 主體,2026-08-31)
 
-專案骨架建立於 `C:\Project\GSend`,技術棧與 §3.2 一致,已本機端對端驗證:
+專案骨架已建立,技術棧與 §3.2 一致,已本機端對端驗證:
 
 - Worker 信令伺服器:4 位數字碼配置(以 Durable Object 名稱作為路由位址)、60 秒有效期、
   首次配對後燒毀、per-IP 限速(12 次/分)、5 分鐘 resume 寬限期、閒置回收。
