@@ -333,8 +333,9 @@ and what usually fixes it.
 
 **A privacy page** at [/privacy](https://gsend.cc/privacy) sets out exactly what the
 server handles, what it never receives, what stays on your device, and who else is
-involved (the host, and the STUN servers that see an IP address during connection
-setup). In English and Traditional Chinese.
+involved (the host, which also counts visits with Cloudflare Web Analytics, and the STUN
+servers that see an IP address during connection setup). In English and Traditional
+Chinese.
 
 Known gaps, all scheduled:
 - **`showSaveFilePicker()` is not used yet.** On Chromium desktop and Chrome Android it

@@ -168,7 +168,7 @@
       </header>
 
       <h1>Privacy</h1>
-      <p class="updated">Last updated 3 October 2026</p>
+      <p class="updated">Last updated 15 October 2026</p>
 
       <div class="card">
         <h2>The short version</h2>
@@ -180,7 +180,9 @@
           encrypted relay passes the data along without being able to read it either.
         </p>
         <p>
-          There are no accounts, no cookies, no analytics and no third-party trackers.
+          There are no accounts, no cookies and no third-party trackers. To know how many
+          people use GSend, the site counts page views with Cloudflare Web Analytics, which
+          stores nothing on your device and never sees your files or codes.
         </p>
       </div>
 
@@ -271,6 +273,15 @@
           ordinary request information any web host sees.
         </li>
         <li>
+          <strong>Cloudflare Web Analytics</strong> counts visits, so we know how many people
+          use GSend. When a page opens, a small Cloudflare script reports the page's address
+          without anything after the "?" (so never a code from a link), the site you came
+          from, your browser, operating system and type of device, and how fast the page
+          loaded; Cloudflare adds the country your connection comes from. It sets no cookies
+          and stores nothing on your device, and Cloudflare says it collects no personal data
+          and does not follow visitors from site to site. We only ever see totals.
+        </li>
+        <li>
           <strong>STUN servers run by Cloudflare and Google</strong> are asked, during connection
           setup, how your device appears from the outside. This tells them your IP address; no
           file data passes through them. When no direct route exists, <strong>Cloudflare's TURN
@@ -298,7 +309,7 @@
       <hr />
 
       <h1>隱私說明</h1>
-      <p class="updated">最後更新:2026 年 10 月 3 日</p>
+      <p class="updated">最後更新:2026 年 10 月 15 日</p>
 
       <div class="card">
         <h2>簡短版本</h2>
@@ -307,7 +318,10 @@
           伺服器唯一的工作是讓兩台裝置認識彼此,而且它的設計讓它就算想看也讀不到你的檔案。
           當雙方的網路不允許裝置直接連通時,會由加密中繼轉送,中繼同樣讀不到內容。
         </p>
-        <p>沒有帳號、沒有 cookie、沒有分析工具、沒有第三方追蹤。</p>
+        <p>
+          沒有帳號、沒有 cookie、沒有第三方追蹤。
+          為了知道有多少人使用 GSend,本站用 Cloudflare Web Analytics 計算瀏覽次數;它不在你的裝置上儲存任何東西,也看不到你的檔案和數字碼。
+        </p>
       </div>
 
       <h2>伺服器會經手什麼</h2>
@@ -373,6 +387,12 @@
       <h2>還有誰參與其中</h2>
       <ul>
         <li><strong>Cloudflare</strong> 提供本站與信令伺服器的代管,會看到任何網站主機都會看到的一般請求資訊。</li>
+        <li>
+          <strong>Cloudflare Web Analytics</strong> 替我們計算瀏覽次數,讓我們知道有多少人使用 GSend。
+          每次打開頁面,Cloudflare 的一小段程式會回報頁面的網址(不含「?」之後的部分,所以連結裡的數字碼不會在內)、你從哪個網站過來、瀏覽器、作業系統、裝置類型,以及頁面載入得多快;Cloudflare 會加上你連線所在的國家。
+          它不設 cookie,也不在你的裝置上儲存任何東西;Cloudflare 表示它不收集個人資料,也不會跨網站追蹤訪客。
+          我們只看得到總數。
+        </li>
         <li>
           <strong>Cloudflare 與 Google 的 STUN 伺服器</strong>會在建立連線時被詢問你的裝置從外部看起來是什麼樣子,
           這會讓它們得知你的 IP 位址;沒有任何檔案資料經過它們。當直連不存在時,

@@ -193,7 +193,7 @@ HostPanel 顯示 4719 + QR                                      「🦉 綠色�
 
 **「What stays on your device / 留在你裝置上的東西」新增:** 「在附近顯示這台裝置」這個開關。
 
-「There are no accounts, no cookies, no analytics…」那一句仍然成立,不用改。
+「There are no accounts, no cookies and no third-party trackers…」那一句仍然成立,不用改。
 
 ### 5.2 `README.md`
 

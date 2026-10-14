@@ -16,7 +16,7 @@
 
 - **每個 commit 都公開。** repo 是公開的，gsend.cc 也是。檔案、commit 訊息和 `public/` 只寫可以公開的內容：沒有個人姓名、個人帳戶名、私人電郵、本機路徑和秘密（金鑰、密碼、token）。連結只用 `github.com/JetPiggy/GSend` 和 gsend.cc；對外聯絡寫 `gsend@jetpiggy.com`，私隱查詢寫 `privacy@jetpiggy.com`。只適用某部電腦的資料寫在 git 不追蹤的 `CLAUDE.local.md`。
 - **gsend.cc 是唯一的網址。** `wrangler.jsonc` 的 `workers_dev` 和 `preview_urls` 保持 `false`：workers.dev 的網址帶着帳戶的個人子網域。
-- **伺服器只做介紹。** 檔案內容、檔名、大小、類型和文字訊息只在兩個瀏覽器之間傳；沒有帳戶、cookie、分析工具和第三方追蹤。一個改動會令伺服器、Cloudflare 或其他第三方收到或記錄的資料有變（包括 `wrangler.jsonc` 的 `observability`），先告訴使用者私隱頁和 README 要跟着改。私隱頁的內容等使用者要求才改；改的時候英文和中文兩段一齊改，並更新「最後更新」日期。
+- **伺服器只做介紹。** 檔案內容、檔名、大小、類型和文字訊息只在兩個瀏覽器之間傳；沒有帳戶、cookie 和第三方追蹤。分析工具只有 Cloudflare Web Analytics（2026-10-15 使用者決定保留，用來看流量）：Cloudflare 在 gsend.cc 每一頁自動加插，不用 cookie，送出的網址不含 `?` 之後的部分。所以網址的路徑只放固定的頁面名，數字碼這類資料放在 `?` 之後。一個改動會令伺服器、Cloudflare 或其他第三方收到或記錄的資料有變（包括 `wrangler.jsonc` 的 `observability` 和 Cloudflare dashboard 的分析設定），先告訴使用者私隱頁和 README 要跟着改。私隱頁的內容等使用者要求才改；改的時候英文和中文兩段一齊改，並更新「最後更新」日期。
 - **品牌素材是輸出檔。** `public/img/` 的飛豬圖、`public/` 的 App 圖示和 `public/fonts/` 的字型來自 JetPiggy 的品牌素材，正本不在這個 repo；哪些不在 MIT 授權範圍內，見 `NOTICE`。建置只用 repo 裏的檔案。圖示由 `npm run icons` 從 `public/img/face.webp` 產生；改了介面字串要重跑 `npm run fonts`。
 - **署名用 JetPiggy。** 版權和公開的署名寫 JetPiggy；commit 身分是 `JetPiggy <hello@jetpiggy.com>`。
 - **只 commit 自己的改動。** 同一個 checkout 可能有其他 session 在改：`git add` 只加自己改過的檔案。
