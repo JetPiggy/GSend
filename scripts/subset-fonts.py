@@ -10,15 +10,22 @@ just those. Run it again whenever the strings change:
 
 The folder needs jf-openhuninn-2.1.ttf, Nunito.ttf, TitanOne-Regular.ttf and
 LXGWWenKaiTC-Medium.ttf, with their licence files. Needs fontTools and brotli.
+
+All four are under the SIL Open Font License, which counts a subset as a Modified
+Version (OFL FAQ 2.6), and a Modified Version may not go by a Reserved Font Name. So
+the fonts whose licences reserve their names get names of their own, which the CSS
+uses too: jf open huninn becomes "GSend UI" and Titan One "GSend Digits". Their
+copyright, trademark and licence notices stay as they are.
 """
 
 import html
 import re
 import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
+
+from fontTools import subset
+from fontTools.ttLib import TTFont
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "public" / "fonts"
@@ -30,11 +37,26 @@ ALWAYS = "".join(chr(c) for c in range(0x20, 0x7F)) + "，。、：；！？「�
 
 FONTS = [
     # (source file, output, licence files, character set)
-    ("jf-openhuninn-2.1.ttf", "huninn.woff2", ["openhuninn-LICENSE.txt"], "all"),
+    ("jf-openhuninn-2.1.ttf", "GSendUI.woff2", ["openhuninn-LICENSE.txt"], "all"),
     ("Nunito.ttf", "Nunito.woff2", ["Nunito-OFL.txt"], "latin"),
-    ("TitanOne-Regular.ttf", "TitanOne.woff2", ["TitanOne-OFL.txt"], "digits"),
+    ("TitanOne-Regular.ttf", "GSendDigits.woff2", ["TitanOne-OFL.txt"], "digits"),
     ("LXGWWenKaiTC-Medium.ttf", "WenKai.woff2", ["LXGWWenKaiTC-OFL.txt"], "hand"),
 ]
+
+# The fonts whose licences reserve names: the subset's own name, and the reserved names
+# it must not carry. jf open huninn is built on Varela Round, whose reserved names
+# carry over.
+RENAMED = {
+    "jf-openhuninn-2.1.ttf": ("GSend UI", ["open huninn", "huninn", "Varela", "Varela Round"]),
+    "TitanOne-Regular.ttf": ("GSend Digits", ["Titan", "Titan One"]),
+}
+
+# The name records a subset keeps: the names (1-6) and the copyright (0), trademark (7)
+# and licence (13, 14) notices. The OFL wants every copy of a font to carry its
+# copyright notice and licence, and its FAQ (3.7) wants trademark notices kept.
+NAME_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 13, 14]
+# The copyright and trademark notices name the original font, as they must.
+NOTICES = {0, 7}
 
 
 def string_values(source: str, prefix: str = "") -> str:
@@ -64,9 +86,43 @@ def charset(kind: str) -> str:
         for page in PAGES:
             text |= set(page_text(page))
     if kind == "latin":
-        # Nunito only covers Latin; the Chinese falls through to huninn.
+        # Nunito only covers Latin; the Chinese falls through to GSend UI.
         text = {c for c in text if ord(c) < 0x3000}
     return "".join(sorted(c for c in text if not c.isspace() or c == " "))
+
+
+def reserves_names(font: TTFont, src: Path, licences: list[str]) -> bool:
+    """Whether the copyright notice, in the font or atop a licence file, reserves names."""
+    notices = [font["name"].getDebugName(0) or ""]
+    for name in licences:
+        # A licence file starts with the copyright notice, then the OFL text itself.
+        text = (src / name).read_text(encoding="utf-8")
+        notices.append(text.split("SIL OPEN FONT LICENSE")[0])
+    return any("Reserved Font Name" in notice for notice in notices)
+
+
+def rename(font: TTFont, family: str) -> None:
+    """Gives a subset its own name in every record that names the font."""
+    name = font["name"]
+    postscript = family.replace(" ", "") + "-Regular"
+    names = {1: family, 3: f"{name.getDebugName(5)};{postscript}", 4: family, 6: postscript}
+    name.names = [record for record in name.names if record.nameID not in names]
+    for name_id, value in names.items():
+        name.setName(value, name_id, 3, 1, 0x409)
+
+
+def check_names(font: TTFont, source: str, reserved: list[str]) -> None:
+    """Stops if any record but the copyright and trademark notices still carries a reserved name."""
+
+    def squash(s: str) -> str:
+        return re.sub(r"[\s_-]", "", s).lower()
+
+    for record in font["name"].names:
+        if record.nameID in NOTICES:
+            continue
+        for word in reserved:
+            if squash(word) in squash(record.toUnicode()):
+                sys.exit(f"{source}: name record {record.nameID} still carries {word!r}")
 
 
 def main() -> None:
@@ -76,18 +132,22 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     for font, out, licences, kind in FONTS:
         chars = charset(kind)
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", delete=False) as tf:
-            tf.write(chars)
-        target = OUT / out
-        subprocess.run(
-            [
-                sys.executable, "-m", "fontTools.subset", str(src / font),
-                f"--text-file={tf.name}", "--flavor=woff2", f"--output-file={target}",
-                "--layout-features=*", "--no-hinting", "--desubroutinize",
-            ],
-            check=True,
+        options = subset.Options(
+            flavor="woff2", layout_features=["*"], hinting=False, desubroutinize=True,
+            name_IDs=NAME_IDS,
         )
-        Path(tf.name).unlink()
+        ttf = subset.load_font(str(src / font), options, dontLoadGlyphNames=True)
+        if font not in RENAMED and reserves_names(ttf, src, licences):
+            sys.exit(f"{font}: its licence reserves font names; give it a name in RENAMED")
+        subsetter = subset.Subsetter(options)
+        subsetter.populate(text=chars)
+        subsetter.subset(ttf)
+        if font in RENAMED:
+            family, reserved = RENAMED[font]
+            rename(ttf, family)
+            check_names(ttf, font, reserved)
+        target = OUT / out
+        subset.save_font(ttf, str(target), options)
         for licence in licences:
             shutil.copyfile(src / licence, OUT / licence)
         print(f"{out}: {len(chars)} chars, {target.stat().st_size} bytes")

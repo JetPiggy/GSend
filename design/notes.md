@@ -86,6 +86,7 @@ GSend 跟 JetPiggy 的「墨線」方向（見 JetPiggy 品牌網站）：紙底
 - **手機**：連線中先列收到的檔案，傳送控件在後；手機不能拖檔案，拖放框只剩「揀檔案」掣。
 - **私隱頁**：只換外觀（紙底、品牌字、跟隨工作模式），文字未改；不再向 Google Fonts 取字型。
 - **字型自己供應**：`scripts/subset-fonts.py` 由 JetPiggy 的字型原檔切出用到的字（粉圓 105 KB、Nunito 27 KB、Titan One 1 KB、文楷 30 KB），放 `public/fonts`，附授權檔。改字串後要重跑。
+- **子集字型改名**：粉圓和 Titan One 的授權（SIL OFL）保留了字型名稱，子集算修改版，不可以用原名。所以子集叫「GSend UI」（`GSendUI.woff2`）和「GSend Digits」（`GSendDigits.woff2`），字型裏面和 CSS 都用這兩個名；版權、商標和授權說明照原樣保留。
 
 ### 證據
 

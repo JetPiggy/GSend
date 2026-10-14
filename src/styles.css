@@ -8,12 +8,13 @@
  * layout and every control stay exactly where they were, so switching costs nothing.
  *
  * Fonts are served from /fonts (see scripts/subset-fonts.py); nothing is fetched from
- * another site.
+ * another site. "GSend UI" is jf open huninn and "GSend Digits" is Titan One: their
+ * licences reserve those names, and a subset may not use them.
  */
 
-@font-face { font-family: "huninn"; src: url(/fonts/huninn.woff2) format("woff2"); font-display: swap; }
+@font-face { font-family: "GSend UI"; src: url(/fonts/GSendUI.woff2) format("woff2"); font-display: swap; }
 @font-face { font-family: "Nunito"; src: url(/fonts/Nunito.woff2) format("woff2"); font-weight: 300 900; font-display: swap; }
-@font-face { font-family: "Titan One"; src: url(/fonts/TitanOne.woff2) format("woff2"); font-display: block; }
+@font-face { font-family: "GSend Digits"; src: url(/fonts/GSendDigits.woff2) format("woff2"); font-display: block; }
 @font-face { font-family: "WenKai"; src: url(/fonts/WenKai.woff2) format("woff2"); font-display: swap; }
 
 :root {
@@ -33,12 +34,12 @@
   --focus: #5DA6E8;
   --ok: #2E7D4F;
 
-  --ui: "Nunito", "huninn", system-ui, -apple-system, "PingFang HK", "Microsoft JhengHei", sans-serif;
+  --ui: "Nunito", "GSend UI", system-ui, -apple-system, "PingFang HK", "Microsoft JhengHei", sans-serif;
   /* File names, messages and device names can hold any character; the subset fonts do
      not, so they get one system face rather than a patchwork. */
   --user: "Nunito", system-ui, -apple-system, "PingFang HK", "Microsoft JhengHei", sans-serif;
-  --digits: "Titan One", "Nunito", sans-serif;
-  --hand: "WenKai", "huninn", sans-serif;
+  --digits: "GSend Digits", "Nunito", sans-serif;
+  --hand: "WenKai", "GSend UI", sans-serif;
 
   --line-w: 3px;
   --line: var(--line-w) solid var(--ink);

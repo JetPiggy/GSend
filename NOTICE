@@ -31,6 +31,15 @@ Except as noted below, this project is licensed under the MIT License
    The fonts in public/fonts/ are subsets of the original fonts and keep
    their own licences. The licence files are in the same folder.
 
+   jf open huninn 和 Titan One 的授權保留了字型名稱（Reserved Font
+   Name）。子集屬於修改版，不可以沿用這些名稱，所以改了名：
+   The licences of jf open huninn and Titan One reserve their font names.
+   A subset is a Modified Version and may not use them, so these two are
+   renamed:
+
+   - GSendUI.woff2 ("GSend UI"): jf open huninn, openhuninn-LICENSE.txt
+   - GSendDigits.woff2 ("GSend Digits"): Titan One, TitanOne-OFL.txt
+
 3. 其他第三方程式庫 / Other third-party libraries
 
    各自保留原本的授權，見 package.json。
