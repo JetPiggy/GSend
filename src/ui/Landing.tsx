@@ -6,6 +6,7 @@ import CodeBoxes from "./CodeBoxes";
 import { DeviceChips, DeviceManager } from "./DeviceList";
 import { DropOverlay, useWindowDrop } from "./drop";
 import { HandNote, Stamps } from "./hand";
+import TextBox from "./TextBox";
 
 interface Props {
   client: GSendClient;
@@ -41,7 +42,7 @@ export default function Landing({ client, state, code, onCode, limitLine }: Prop
 
   const dragging = useWindowDrop(add);
 
-  const start = () => client.host(files, draft.trim() || null);
+  const start = () => client.host(files, draft);
 
   // Enter with nothing in particular focused gets the code, as the button would.
   useEffect(() => {
@@ -171,16 +172,13 @@ export default function Landing({ client, state, code, onCode, limitLine }: Prop
             {t("landing.chooseFiles")}
           </button>
           <input ref={fileInput} type="file" multiple hidden onChange={(event) => add(event.target.files)} />
-          <input
-            className="field"
+          <TextBox
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              // Not while an input method is still composing: that Enter picks a word.
-              if (event.key === "Enter" && !event.nativeEvent.isComposing) start();
-            }}
+            onChange={setDraft}
+            onEnter={start}
+            enterKeyHint="go"
             placeholder={t("landing.textPlaceholder")}
-            aria-label={t("landing.textLabel")}
+            label={t("landing.textLabel")}
           />
         </div>
 

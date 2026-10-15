@@ -56,7 +56,7 @@ export function DeviceChips({ client, state, files, text, managing, onManage }: 
                 disabled={!device.online}
                 title={action}
                 aria-label={action}
-                onClick={() => client.connectToDevice(device.id, files, text.trim() || null)}
+                onClick={() => client.connectToDevice(device.id, files, text)}
               >
                 <span className="chip__dot" aria-hidden="true" />
                 <span className="chip__name">{device.name}</span>

@@ -5,6 +5,7 @@ import { directPickerSupported, formatBytes, maxFileBytes } from "../core/sink";
 import type { TransferView } from "../core/transfer";
 import { useI18n, type MessageKey, type Translator } from "../i18n";
 import { DropOverlay, useWindowDrop } from "./drop";
+import TextBox from "./TextBox";
 
 interface Props {
   client: GSendClient;
@@ -35,8 +36,7 @@ export default function TransferPanel({ client, state }: Props) {
 
   const dragging = useWindowDrop(send);
 
-  const submitText = (event: React.FormEvent) => {
-    event.preventDefault();
+  const submitText = () => {
     if (!draft.trim()) return;
     client.sendText(draft);
     setDraft("");
@@ -144,13 +144,20 @@ export default function TransferPanel({ client, state }: Props) {
           <input ref={fileInput} type="file" multiple hidden onChange={(event) => send(event.target.files)} />
         </div>
 
-        <form className="composer" onSubmit={submitText}>
-          <input
-            className="field"
+        <form
+          className="composer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitText();
+          }}
+        >
+          <TextBox
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={setDraft}
+            onEnter={submitText}
+            enterKeyHint="send"
             placeholder={t("transfer.textPlaceholder")}
-            aria-label={t("transfer.textLabel")}
+            label={t("transfer.textLabel")}
           />
           <button type="submit" className="btn" disabled={!draft.trim()}>
             {t("transfer.send")}

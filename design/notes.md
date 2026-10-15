@@ -88,6 +88,7 @@ GSend 跟 JetPiggy 的「墨線」方向（見 JetPiggy 品牌網站）：紙底
 - **字型自己供應**：`scripts/subset-fonts.py` 由 JetPiggy 的字型原檔切出用到的字（粉圓 105 KB、Nunito 27 KB、Titan One 1 KB、文楷 30 KB），放 `public/fonts`，附授權檔。改字串後要重跑。
 - **子集字型改名**：粉圓和 Titan One 的授權（SIL OFL）保留了字型名稱，子集算修改版，不可以用原名。所以子集叫「GSend UI」（`GSendUI.woff2`）和「GSend Digits」（`GSendDigits.woff2`），字型裏面和 CSS 都用這兩個名；版權、商標和授權說明照原樣保留。
 - **第三個印章改為「不上傳／No uploads」**（2026-10-15）：原本是「無痕／No trace」。「無痕」是瀏覽器「無痕模式」的字，容易讀成不記錄、不追蹤，但 gsend.cc 保留了 Cloudflare Web Analytics 來看流量。「不上傳」只講檔案從不上傳到伺服器，是事實。頁面描述和 manifest 的「nothing stored on a server」也同樣收窄為「nothing you send」。
+- **文字框改為多行**（2026-10-16）：首頁和連線中的文字框原本是單行 input，貼上一段文字時瀏覽器會刪走換行，對方收到的是一整行。改為 textarea：開頭一行高，跟內容長高，最多大約六行就捲動；Enter 照舊送出（首頁是產生數字碼），Shift+Enter 換行。送出時只去掉頭尾的空行和行尾空白，第一行的縮排保留。
 
 ### 證據
 

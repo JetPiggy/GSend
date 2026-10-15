@@ -336,6 +336,9 @@ html.work .btn--text:hover:not(:disabled) { background: none; color: var(--ink);
 .field::placeholder { color: var(--muted); font-family: var(--ui); opacity: 1; }
 .field:focus-visible { outline-offset: 2px; }
 html.work .field { min-height: 48px; font-size: 16px; padding: 0 14px; caret-color: auto; }
+/* The text to send: one line to start, growing with what is typed or pasted. */
+.field--text { display: block; padding-block: 13px; line-height: 1.4; max-height: 180px; resize: none; overflow-y: auto; }
+html.work .field--text { padding-block: 11px; }
 
 /* ── handwriting: the red notes and stamps ─────────────────────────────── */
 
@@ -764,7 +767,7 @@ html.work .message--mine .message__body { background: #F4F4F4; }
 .arrow-up { width: 30px; height: 36px; }
 html.work .arrow-up path { stroke-width: 1.6; stroke: var(--muted); }
 
-.composer { display: flex; gap: 10px; }
+.composer { display: flex; align-items: flex-end; gap: 10px; }
 .composer .field { flex: 1; }
 .composer .btn { padding-inline: 18px; }
 
@@ -904,6 +907,7 @@ html.work .code-row--intro .code-box { animation: none; }
   .transfer { padding: 12px 14px; grid-template-columns: 22px minmax(0, 1fr) auto; }
   .btn { font-size: 17px; }
   .btn, .field, .link-copy { min-height: 48px; }
+  .field--text { padding-block: 8px; }
   .btn--small, .chip { min-height: 40px; }
   .btn--text { min-height: 36px; }
   .sheet { padding: 18px; }

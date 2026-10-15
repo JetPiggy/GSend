@@ -417,7 +417,7 @@ export class GSendClient {
     this.resetSession();
     // Set after resetSession, which would otherwise clear them.
     this.pendingFiles = files;
-    this.pendingText = text;
+    this.pendingText = tidyText(text);
     this.mode = "group";
     this.peerDevice = id;
     this.groupSession = crypto.randomUUID();
@@ -603,7 +603,7 @@ export class GSendClient {
     this.role = "host";
     // Set after resetSession, which would otherwise clear them.
     this.pendingFiles = files;
-    this.pendingText = text;
+    this.pendingText = tidyText(text);
     this.emitNow();
     this.signaling.connect({ role: "host" });
   }
@@ -657,7 +657,7 @@ export class GSendClient {
       return;
     }
     this.pendingFiles = files;
-    this.pendingText = text;
+    this.pendingText = tidyText(text);
     this.flushPendingShare();
     this.emitNow();
   }
@@ -688,15 +688,15 @@ export class GSendClient {
   }
 
   sendText(body: string): void {
-    const trimmed = body.trim();
-    if (!trimmed) return;
+    const tidy = tidyText(body);
+    if (!tidy) return;
     if (!this.channelsOpen) {
       this.pendingText = this.pendingText ? `${this.pendingText}
-${trimmed}` : trimmed;
+${tidy}` : tidy;
       this.emitNow();
       return;
     }
-    this.transfer.sendText(trimmed);
+    this.transfer.sendText(tidy);
   }
 
   /**
@@ -1688,4 +1688,13 @@ function isRelayForced(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Text as it is sent: blank lines and spaces at either end go, but the line breaks
+ * inside and the first line's indent stay, so pasted code keeps its shape. Null when
+ * nothing is left.
+ */
+function tidyText(body: string | null): string | null {
+  return body?.replace(/^\s*\n/, "").trimEnd() || null;
 }
