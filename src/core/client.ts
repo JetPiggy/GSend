@@ -18,7 +18,14 @@ import {
   restoreSaveDirectory,
   saveDirectoryName,
 } from "./sink";
-import { forgetDevice, forgetGroup, groupSecret, knownDevices, type KnownDevice } from "./devices";
+import {
+  forgetDevice,
+  forgetGroup,
+  groupSecret,
+  knownDevices,
+  renameKnownDevice,
+  type KnownDevice,
+} from "./devices";
 import { GroupLink } from "./group";
 import { Handshake, isHandshakeMessage, type PairOffer } from "./handshake";
 import { loadIdentity, renameDevice, type Identity } from "./identity";
@@ -32,7 +39,10 @@ export type Mode = "code" | "group";
 /** A device this one has been paired with, and whether it is reachable right now. */
 export interface DeviceView {
   id: string;
+  /** The name this device gave it, or else its own. */
   name: string;
+  /** What the device calls itself. */
+  ownName: string;
   online: boolean;
 }
 
@@ -385,6 +395,13 @@ export class GSendClient {
 
   async rename(name: string): Promise<void> {
     this.identity = await renameDevice(name);
+    this.emitNow();
+  }
+
+  /** Call a paired device something else here; the other device is not told. */
+  async renamePeer(id: string, name: string): Promise<void> {
+    await renameKnownDevice(id, name);
+    this.paired = await knownDevices();
     this.emitNow();
   }
 
@@ -1252,9 +1269,14 @@ ${tidy}` : tidy;
       send: (msg) => this.peer?.sendControl(JSON.stringify(msg)),
       onVerified: (device) => {
         this.verified = true;
-        this.peerName = device.name;
-        // A paired device's name is kept current each time the two meet.
+        this.peerName = this.paired.find((known) => known.id === device.id)?.alias ?? device.name;
+        // A paired device's name is kept current each time the two meet, by code or not.
         if (this.mode === "group") void this.refreshDevices();
+        else
+          void knownDevices().then((devices) => {
+            this.paired = devices;
+            this.emitNow();
+          });
         // Asked before a reconnect made the proof start over; the answer still stands.
         if (this.wantPair) this.handshake?.consent();
 
@@ -1638,7 +1660,8 @@ ${tidy}` : tidy;
       identity: this.identity ? { id: this.identity.id, name: this.identity.name } : null,
       devices: this.paired.map((device) => ({
         id: device.id,
-        name: device.name,
+        name: device.alias ?? device.name,
+        ownName: device.name,
         online: this.presence.has(device.id),
       })),
       groupOnline: this.group.online,

@@ -246,8 +246,10 @@ export class Handshake {
     this.verified = true;
 
     const device = toDevice(this.claim);
-    // Two paired devices meeting again: keep the name the other one goes by now.
-    if (this.mode === "group") await rememberDevice(device);
+    // Two paired devices meeting again, by code or not: keep the name the other one
+    // goes by now. A code session with a device never paired remembers nothing yet.
+    const known = (await knownDevices()).some((paired) => paired.id === device.id);
+    if (this.mode === "group" || known) await rememberDevice(device);
 
     this.handlers.onVerified(device);
     if (this.mode === "code") this.handlers.onPairing(this.offer());

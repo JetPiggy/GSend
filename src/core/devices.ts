@@ -19,7 +19,10 @@ const KEY = "group";
 
 export interface KnownDevice {
   id: string;
+  /** What the device calls itself, as it last said. */
   name: string;
+  /** What this device calls it instead, if it was renamed here. Never sent anywhere. */
+  alias?: string;
   /** Base64url SPKI, used to verify that a device in the room is really that device. */
   publicKey: string;
   addedAt: number;
@@ -98,8 +101,21 @@ export async function adoptGroup(secret: string, inviter: string): Promise<numbe
 
 export async function rememberDevice(device: KnownDevice): Promise<void> {
   const group = (await read()) ?? { secret: await createGroup(), devices: [] };
+  const alias = group.devices.find((known) => known.id === device.id)?.alias;
   const devices = group.devices.filter((known) => known.id !== device.id);
-  devices.push(device);
+  // Meeting again updates what the device calls itself, not the name given it here.
+  devices.push(alias ? { ...device, alias } : device);
+  await write({ ...group, devices });
+}
+
+/** Call a paired device something else on this device only. An empty name goes back to its own. */
+export async function renameKnownDevice(id: string, name: string): Promise<void> {
+  const group = await read();
+  if (!group) return;
+  const alias = name.trim().slice(0, 40);
+  const devices = group.devices.map((known) =>
+    known.id === id ? { ...known, alias: alias && alias !== known.name ? alias : undefined } : known,
+  );
   await write({ ...group, devices });
 }
 

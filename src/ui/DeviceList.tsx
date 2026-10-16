@@ -69,18 +69,58 @@ export function DeviceChips({ client, state, files, text, managing, onManage }: 
   );
 }
 
-/** Renaming this device, unpairing others, and where files sent to it land. */
+/**
+ * Renaming this device and the others, unpairing, and where files sent to it land. A
+ * name given another device stays here: it never reaches that device, and an empty one
+ * goes back to the name the device gives itself.
+ */
 export function DeviceManager({ client, state }: { client: GSendClient; state: Snapshot }) {
   const { t } = useI18n();
-  const [editing, setEditing] = useState(false);
+  // The device whose name is being edited, this one included.
+  const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
 
   if (!state.identity) return null;
+  const self = state.identity;
+
+  const startEditing = (id: string, name: string) => {
+    setDraft(name);
+    setEditing(id);
+  };
 
   const commitName = () => {
-    setEditing(false);
-    if (draft.trim()) void client.rename(draft);
+    const id = editing;
+    setEditing(null);
+    if (id === self.id) {
+      if (draft.trim()) void client.rename(draft);
+    } else if (id) {
+      void client.renamePeer(id, draft);
+    }
   };
+
+  const nameField = (label: string, placeholder?: string) => (
+    <input
+      className="field manage__rename"
+      value={draft}
+      autoFocus
+      placeholder={placeholder}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commitName}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing) return;
+        if (event.key === "Enter") commitName();
+        if (event.key === "Escape") setEditing(null);
+      }}
+      aria-label={label}
+    />
+  );
+
+  const renameButton = (id: string, name: string) =>
+    editing !== id && (
+      <button type="button" className="btn btn--ghost btn--small" onClick={() => startEditing(id, name)}>
+        {t("devices.rename")}
+      </button>
+    );
 
   return (
     <section className="sheet manage" aria-labelledby="manage-title">
@@ -88,47 +128,32 @@ export function DeviceManager({ client, state }: { client: GSendClient; state: S
 
       <ul className="manage__list">
         <li className="manage__item">
-          {editing ? (
-            <input
-              className="field manage__rename"
-              value={draft}
-              autoFocus
-              onChange={(event) => setDraft(event.target.value)}
-              onBlur={commitName}
-              onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing) return;
-                if (event.key === "Enter") commitName();
-                if (event.key === "Escape") setEditing(false);
-              }}
-              aria-label={t("devices.namePrompt")}
-            />
+          {editing === self.id ? (
+            nameField(t("devices.namePrompt"))
           ) : (
-            <span className="manage__name">{state.identity.name}</span>
+            <span className="manage__name">{self.name}</span>
           )}
           <span className="manage__meta">
             {t("devices.thisDevice")}
             {!state.groupOnline && ` · ${t("devices.offline")}`}
           </span>
-          {!editing && (
-            <button
-              type="button"
-              className="btn btn--ghost btn--small"
-              onClick={() => {
-                setDraft(state.identity?.name ?? "");
-                setEditing(true);
-              }}
-            >
-              {t("devices.rename")}
-            </button>
-          )}
+          {renameButton(self.id, self.name)}
         </li>
 
         {state.devices.map((device) => (
           <li key={device.id} className="manage__item">
-            <span className="manage__name" title={device.id}>
-              {device.name}
+            {editing === device.id ? (
+              nameField(t("devices.namePeer", { name: device.ownName }), device.ownName)
+            ) : (
+              <span className="manage__name" title={device.id}>
+                {device.name}
+              </span>
+            )}
+            <span className="manage__meta">
+              {device.online ? t("devices.online") : t("devices.offline")}
+              {device.name !== device.ownName && ` · ${t("devices.ownName", { name: device.ownName })}`}
             </span>
-            <span className="manage__meta">{device.online ? t("devices.online") : t("devices.offline")}</span>
+            {renameButton(device.id, device.name)}
             <button type="button" className="btn btn--ghost btn--small" onClick={() => void client.unpair(device.id)}>
               {t("devices.unpair")}
             </button>

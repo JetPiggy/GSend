@@ -172,6 +172,8 @@ export const en = {
   "devices.notRemembered":
     "This browser will not keep a durable store, so devices cannot be remembered here. Private browsing is the usual reason.",
   "devices.namePrompt": "Name this device",
+  "devices.namePeer": "Name {name} on this device",
+  "devices.ownName": "calls itself {name}",
   "devices.savingTo": "Files sent to this device go straight into {folder}.",
   "devices.savingNowhere":
     "Files sent to this device wait in the browser until you save them. Pick a folder and they land in it on their own.",
@@ -378,6 +380,8 @@ export const zh: Record<MessageKey, string> = {
   "devices.verifying": "正在確認對方真的是「{name}」…",
   "devices.notRemembered": "這個瀏覽器不提供長期儲存，所以記不住裝置，通常是因為無痕模式。",
   "devices.namePrompt": "為這部裝置改名",
+  "devices.namePeer": "在這部裝置為「{name}」改名",
+  "devices.ownName": "本身叫「{name}」",
   "devices.savingTo": "傳到這部裝置的檔案會直接寫入「{folder}」。",
   "devices.savingNowhere": "傳到這部裝置的檔案會先留在瀏覽器等你儲存。揀一個資料夾，之後就會自動存進去。",
   "devices.changeFolder": "更改",

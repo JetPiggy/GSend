@@ -202,6 +202,11 @@ device list with live presence, and sending is one click with no code, no QR and
 typing. The destination folder is remembered too, so a file sent to a paired device is
 written where it belongs without anyone touching the receiving machine.
 
+Each device names itself, and the name it gives is updated whenever two paired devices
+meet again, by code or not. A device can also give another one a name of its own in
+the device list. That name stays in its browser and is never sent; cleared, the list
+goes back to the name the other device gives itself.
+
 A tab still running a build from before this pairs the old way, on its own, the moment
 the proof is through: it lists the newer device at once, and if it is the side that
 hands over its group, it sends the secret unasked. The newer device keeps that secret
