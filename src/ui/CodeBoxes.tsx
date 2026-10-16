@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type InputHTMLAttributes,
+  type ReactNode,
+} from "react";
 
 /**
  * The four big boxes: the code being typed on the receiving side, and the code shown on
@@ -15,8 +22,8 @@ let introPlayed = false;
 interface Props {
   /** The digits to show, left to right. */
   value: string;
-  /** The box holding the caret, while the hidden input has focus. */
-  caret?: number | null;
+  /** The hidden input's selection while it has focus, from `useCodeEditing`. */
+  selection?: BoxSelection | null;
   /** Waiting for a code: the boxes pulse instead of showing digits. */
   pending?: boolean;
   /** The digits arrive together (a code being handed out), so stamp them one by one. */
@@ -26,7 +33,7 @@ interface Props {
   children?: ReactNode;
 }
 
-export default function CodeBoxes({ value, caret = null, pending = false, stagger = false, label, children }: Props) {
+export default function CodeBoxes({ value, selection = null, pending = false, stagger = false, label, children }: Props) {
   const [intro] = useState(() => !introPlayed);
   useEffect(() => {
     introPlayed = true;
@@ -48,11 +55,14 @@ export default function CodeBoxes({ value, caret = null, pending = false, stagge
     >
       {Array.from({ length: LENGTH }, (_, index) => {
         const digit = value[index];
-        const active = caret === index;
+        const [start, end] = selection ?? [-1, -1];
+        // A digit the next one typed replaces, or the empty box it goes into.
+        const marked = digit !== undefined && index >= start && index < end;
+        const caret = digit === undefined && start === end && index === start;
         return (
           <div
             key={index}
-            className={active ? "code-box code-box--active" : "code-box"}
+            className={marked || caret ? "code-box code-box--active" : "code-box"}
             style={{ "--i": index } as CSSProperties}
             aria-hidden="true"
           >
@@ -62,9 +72,10 @@ export default function CodeBoxes({ value, caret = null, pending = false, stagge
               </span>
             ) : pending ? (
               <span className="code-box__dot" />
-            ) : active ? (
+            ) : caret ? (
               <span className="code-box__caret" />
             ) : null}
+            {marked && <span className="code-box__mark" />}
           </div>
         );
       })}
@@ -74,4 +85,65 @@ export default function CodeBoxes({ value, caret = null, pending = false, stagge
       {children}
     </div>
   );
+}
+
+type BoxSelection = [start: number, end: number];
+
+/**
+ * Editing the code in place, for the hidden input laid over the boxes. A caret inside
+ * the code selects the digit after it, so the next digit typed replaces that one as it
+ * would in a box of its own, and a tap selects the box under it. Past the digits typed
+ * so far, a tap is the next empty box: the code has no gaps.
+ */
+export function useCodeEditing(): {
+  selection: BoxSelection | null;
+  inputProps: InputHTMLAttributes<HTMLInputElement>;
+} {
+  const [selection, setSelection] = useState<BoxSelection | null>(null);
+
+  const settle = (input: HTMLInputElement) => {
+    const filled = input.value.length;
+    let start = input.selectionStart ?? filled;
+    let end = input.selectionEnd ?? start;
+    if (start === end && (start < filled || filled === LENGTH)) {
+      start = Math.min(start, LENGTH - 1);
+      end = start + 1;
+      input.setSelectionRange(start, end);
+    }
+    setSelection([start, end]);
+  };
+
+  return {
+    selection,
+    inputProps: {
+      onFocus: (event) => settle(event.currentTarget),
+      onSelect: (event) => settle(event.currentTarget),
+      // A digit just typed over one moves the selection on; not every browser says so
+      // with a select event.
+      onInput: (event) => settle(event.currentTarget),
+      onBlur: () => setSelection(null),
+      onClick: (event) => {
+        const input = event.currentTarget;
+        const boxes = [...(input.parentElement?.querySelectorAll(".code-box") ?? [])];
+        const index = boxes.findIndex((box) => event.clientX < box.getBoundingClientRect().right);
+        const at = Math.min(index < 0 ? LENGTH - 1 : index, input.value.length);
+        input.setSelectionRange(at, at);
+        settle(input);
+      },
+      onKeyDown: (event) => {
+        const input = event.currentTarget;
+        const start = input.selectionStart ?? 0;
+        // Left from a selected digit would land back on it; go to the one before.
+        if (event.key === "ArrowLeft" && !event.shiftKey && start < (input.selectionEnd ?? 0)) {
+          event.preventDefault();
+          input.setSelectionRange(Math.max(start - 1, 0), Math.max(start - 1, 0));
+          settle(input);
+        }
+        // A letter would replace the selected digit and then be dropped, taking the digit with it.
+        if (event.key.length === 1 && !/\d/.test(event.key) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          event.preventDefault();
+        }
+      },
+    },
+  };
 }

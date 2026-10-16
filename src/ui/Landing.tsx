@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { GSendClient, Snapshot } from "../core/client";
 import { formatBytes } from "../core/sink";
 import { useI18n } from "../i18n";
-import CodeBoxes from "./CodeBoxes";
+import CodeBoxes, { useCodeEditing } from "./CodeBoxes";
 import { DeviceChips, DeviceManager } from "./DeviceList";
 import { DropOverlay, useWindowDrop } from "./drop";
 import { HandNote, Stamps } from "./hand";
@@ -26,12 +26,11 @@ const CODE_LENGTH = 4;
  */
 export default function Landing({ client, state, code, onCode, limitLine }: Props) {
   const { t, tm } = useI18n();
-  const [focused, setFocused] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [draft, setDraft] = useState("");
   const [managing, setManaging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const codeInput = useRef<HTMLInputElement>(null);
+  const editing = useCodeEditing();
 
   const add = (list: Iterable<File> | null) => {
     if (!list) return;
@@ -71,7 +70,6 @@ export default function Landing({ client, state, code, onCode, limitLine }: Prop
   };
 
   const stagedBytes = files.reduce((sum, file) => sum + file.size, 0);
-  const caret = focused && code.length < CODE_LENGTH ? code.length : null;
   const error = tm(state.error);
 
   return (
@@ -109,24 +107,32 @@ export default function Landing({ client, state, code, onCode, limitLine }: Prop
       )}
 
       <form onSubmit={join}>
-        <CodeBoxes value={code} caret={caret} label={t("landing.codeLabel")}>
+        <CodeBoxes value={code} selection={editing.selection} label={t("landing.codeLabel")}>
           {/*
             The real input sits invisibly over the boxes: taps focus it, the numeric
             keyboard opens, autofill still works, and the boxes render its value.
           */}
           <input
-            ref={codeInput}
+            {...editing.inputProps}
             className="code-input"
             value={code}
             onChange={(event) => {
               const next = event.target.value.replace(/\D/g, "").slice(0, CODE_LENGTH);
               onCode(next);
               // The last digit is the whole request, so it is taken as one: no button to
-              // find, which on a phone also meant putting the keyboard away first.
-              if (next.length === CODE_LENGTH && code.length < CODE_LENGTH) client.join(next);
+              // find, which on a phone also meant putting the keyboard away first. A digit
+              // corrected further in waits, since the ones after it may be wrong too.
+              const last = code.length < CODE_LENGTH || event.target.selectionStart === CODE_LENGTH;
+              if (next.length === CODE_LENGTH && last) client.join(next);
             }}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
+            onPaste={(event) => {
+              // A whole code pasted replaces the one there, wherever the caret is.
+              const digits = event.clipboardData.getData("text").replace(/\D/g, "");
+              if (digits.length < CODE_LENGTH) return;
+              event.preventDefault();
+              onCode(digits.slice(0, CODE_LENGTH));
+              client.join(digits.slice(0, CODE_LENGTH));
+            }}
             inputMode="numeric"
             autoComplete="one-time-code"
             aria-label={t("landing.codeLabel")}

@@ -465,6 +465,18 @@ html.work .code-box__digit {
   animation: blink 1.1s step-end infinite;
 }
 html.work .code-box__caret { width: 2px; height: 50cqh; }
+/* Under a digit picked to be replaced: the next one typed goes here. */
+.code-box__mark {
+  position: absolute;
+  bottom: 3cqh;
+  left: 50%;
+  width: 34%;
+  height: clamp(3px, 3cqh, 9px);
+  border-radius: 5px;
+  background: var(--red);
+  transform: translateX(-50%);
+}
+html.work .code-box__mark { height: 2px; bottom: 7cqh; background: var(--ink); }
 .code-box__dot { width: 9cqh; height: 9cqh; border-radius: 50%; background: var(--faint); animation: pulse 1s ease-in-out infinite alternate; animation-delay: calc(var(--i, 0) * 120ms); }
 
 /* The real input sits invisibly over the boxes: taps focus it, the numeric keyboard
@@ -481,6 +493,7 @@ html.work .code-box__caret { width: 2px; height: 50cqh; }
   cursor: text;
   z-index: 3;
 }
+.code-input::selection { background: transparent; }
 
 /* The pig sits on the box being typed into, and hops along as the digits go in. */
 .code-pig {
